@@ -1,0 +1,10 @@
+LET a = 0
+LET b = 1
+LET count = 0
+LBL loop
+LET c = a+b
+LOGVAR a
+LET a = b
+LET b = c
+INC count IF count < 20; GOTO loop
+EXIT
