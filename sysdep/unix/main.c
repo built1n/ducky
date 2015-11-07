@@ -1,7 +1,5 @@
 #include <ducky.h>
-
-#include <fcntl.h>
-#include <unistd.h>
+#include <platform.h>
 
 int main(int argc, char *argv[])
 {
@@ -11,6 +9,9 @@ int main(int argc, char *argv[])
         ducky_main(fd);
         close(fd);
     }
-
+    else
+    {
+        printf("Usage: %s FILE\n", argv[0]);
+    }
     return 0;
 }

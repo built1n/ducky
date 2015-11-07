@@ -1,15 +1,4 @@
-#include <bsd/string.h>
-
-#include <fcntl.h>
-#include <math.h>
-#include <stdarg.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <unistd.h>
+#include <platform.h>
 
 /*******************************************************************************
  * The scripting language implemented here is an extension of DuckyScript.
@@ -58,7 +47,6 @@ typedef int vartype;
 /*** Globals ***/
 
 off_t *line_offset = NULL;
-int default_delay = DEFAULT_DELAY, string_delay = STRING_DELAY;
 
 unsigned lines_executed = 0, current_line = 0, num_lines;
 
@@ -66,8 +54,6 @@ unsigned call_stack[CALL_STACK_SZ];
 unsigned stack_frame = 0;
 
 int log_fd = -1, file_des = -1;
-
-int keys_sent = 0;
 
 struct varnode_t {
     char name[VARNAME_MAX + 1];
@@ -85,7 +71,7 @@ bool isValidVariable(const char *c);
 /* variables are stored in a chained hash map */
 /* collisions are manageable, but should be minimized */
 
-struct varnode_t *var_map[VARMAP_SIZE] = { 0 };
+struct varnode_t *var_map[VARMAP_SIZE];
 
 /* simple DJB hash */
 uint32_t var_hash(const char *str)
@@ -184,6 +170,19 @@ void exit_handler(void)
         close(file_des);
     if(log_fd >= 0)
         close(log_fd);
+    if(line_offset)
+        free(line_offset);
+    /* free all our variables */
+    for(int i = 0; i < VARMAP_SIZE; ++i)
+    {
+        struct varnode_t *iter = var_map[i], *next;
+        while(iter)
+        {
+            next = iter->next;
+            free(iter);
+            iter = next;
+        }
+    }
 }
 
 void vid_write(const char *str)
@@ -1177,8 +1176,21 @@ void init_tokmap(void)
     }
 }
 
+void init_globals(void)
+{
+    line_offset = NULL;
+    log_fd = -1;
+    file_des = -1;
+    stack_frame = 0;
+    lines_executed = 0;
+    current_line = 0;
+    memset(var_map, 0, sizeof(var_map));
+}
+
 void ducky_main(int fd)
 {
+    init_globals();
+
     vid_write("*** DS-2 INIT ***");
     vid_write("QUACK AT YOUR OWN RISK!");
     vid_write("The author assumes no liability for any damages caused by this program.");
