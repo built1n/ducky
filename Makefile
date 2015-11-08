@@ -2,7 +2,7 @@ CC = gcc
 OUT = build
 PLATFORM = unix
 
-DUCKY_OBJ = src/ducky.o
+DUCKY_OBJ = src/interp.o
 
 CFLAGS = -lbsd -lm -Og -g -I src/ -I target/$(PLATFORM)
 
