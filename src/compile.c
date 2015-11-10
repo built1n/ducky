@@ -4,24 +4,13 @@
 #include "opcodes.h"
 
 /*******************************************************************************
- * Bytecode format:
- * { <INSTRUCTION> <ARGS> }...
- * 0x00 - delay S[0] ms, pop
- * 0x01 <A16> - mark as constant - vars[A].const = true
- * 0x02 <A16> - push vars[A]
- * 0x03 <B32> - push *B
- * 0x04 <A16> - pop into vars[A]
- * 0x05 - add the two numbers on top of the stack
- * 0x06 - subtract the number on the top of the stack from the one below it
- * 0x07 - multiply the two numbers on top of the stack
- * 0x08 - S[1]/S[0]
- * 0x09 - jump to S[0]; pop
- * 0x0A - if S[1] == 0; JUMP S[0]; pop both
- * 0x0B - eval S[1] ** S[0]
- * 0x0C - eval S[1] && S[0]
- * 0x0D - eval S[1] & S[0]
- * 0x0E - eval S[1] << S[0]
- * REPEAT: exec line s[0] s[1] times
+ * Bytecode format (all numbers are little-endian):
+ *
+ * +0x00: 'DucK' signature (4 bytes)
+ * +0x04: number of lines (4 bytes)
+ * +0x08: line offsets (4 * num lines)
+ * +    : compiler-generated init code
+ * +(0x08): start of compiled code
  */
 
 /*** Defines ***/
@@ -42,8 +31,6 @@
 #define ARRAYLEN(x) (sizeof(x)/sizeof(x[0]))
 
 #define MIN(x,y) ((x<y)?(x):(y))
-
-typedef long long int vartype;
 
 /*** Globals ***/
 
@@ -72,29 +59,34 @@ static bool isValidVariable(const char *c);
 
 #define MAX_VARS 65336
 static struct var_t vars[MAX_VARS];
+unsigned bytes_written;
 
 void write_instr(instr_t ins)
 {
     write(out_fd, &ins, sizeof(ins));
     vid_logf("writing instruction 0x%x", ins);
+    bytes_written += sizeof(ins);
 }
 
 void write_imm(imm_t imm)
 {
     write(out_fd, &imm, sizeof(imm));
     vid_logf("writing immediate 0x%x", imm);
+    bytes_written += sizeof(imm);
 }
 
 void write_byte(unsigned char c)
 {
     write(out_fd, &c, 1);
     vid_logf("writing byte '%c'", c);
+    bytes_written += 1;
 }
 
 void write_varid(varid_t varid)
 {
     write(out_fd, &varid, sizeof(varid));
     vid_logf("writing varid %d which is %s", varid, vars[varid].name);
+    bytes_written += sizeof(varid);
 }
 
 varid_t get_varid(const char *name)
@@ -224,8 +216,38 @@ static int read_line(int fd, char *buf, size_t sz)
     return (status <= 0)?-1:bytes_read;
 }
 
+/* depends on index_lines, indexes labels in the file */
+static void index_labels(int fd)
+{
+    for(unsigned i = 1; i <= num_lines; ++i)
+    {
+        lseek(fd, line_offset[i], SEEK_SET);
+        char buf[MAX_LINE_LEN];
+        int status = read_line(fd, buf, sizeof(buf));
+
+        /* exit early if failed or too short for a label */
+        if(status < strlen("LBL"))
+            break;
+
+        char *save = NULL;
+        char *tok = strtok_r(buf, " \t", &save);
+        if(tok && (strcmp(tok, "LABEL") == 0 || strcmp("LBL", tok) == 0))
+        {
+            tok = strtok_r(NULL, " \t", &save);
+
+            vid_logf("found label %s val %d", tok, i);
+            if(tok && isValidVariable(tok))
+            {
+                setVariable(tok, i);
+                setConst(tok, true);
+            }
+        }
+    }
+    lseek(fd, 0, SEEK_SET);
+}
+
 /* index_lines() precalculates the offset of each line for faster jumping */
-/* also it does a quick pass to index all the labels */
+/* the line data is only used by index_labels */
 
 static off_t *index_lines(int fd, unsigned *numlines)
 {
@@ -245,18 +267,6 @@ static off_t *index_lines(int fd, unsigned *numlines)
 
         if(read_line(fd, buf, sizeof(buf)) < 0)
             break;
-
-        char *save = NULL;
-        char *tok = strtok_r(buf, " \t", &save);
-        if(tok && (strcmp(tok, "LABEL") == 0 || strcmp("LBL", tok) == 0))
-        {
-            tok = strtok_r(NULL, " \t", &save);
-            if(tok && isValidVariable(tok))
-            {
-                setVariable(tok, idx);
-                setConst(tok, true);
-            }
-        }
 
         ++idx;
     }
@@ -526,9 +536,6 @@ static const struct op_s *getop(const char *ch, int *len)
 static const struct op_s *opstack[MAXOPSTACK];
 static int nopstack;
 
-static vartype numstack[MAXNUMSTACK];
-static int nnumstack;
-
 static void push_opstack(const struct op_s *op)
 {
     if(nopstack>MAXOPSTACK - 1) {
@@ -543,22 +550,6 @@ static const struct op_s *pop_opstack(void)
         error("operator stack empty");
     }
     return opstack[--nopstack];
-}
-
-static void push_numstack(vartype num)
-{
-    if(nnumstack>MAXNUMSTACK - 1) {
-        error("number stack overflow");
-    }
-    numstack[nnumstack++] = num;
-}
-
-static vartype pop_numstack(void)
-{
-    if(!nnumstack) {
-        error("number stack empty");
-    }
-    return numstack[--nnumstack];
 }
 
 static bool isDigit(char c)
@@ -713,7 +704,7 @@ static vartype eval_expr(char *str)
 
                     /* isolate the variable name into a buffer */
                     char varname[VARNAME_MAX + 1] = { 0 };
-                    memcpy(varname, str, expr - tstart);
+                    memcpy(varname, tstart, expr - tstart);
                     write_varid(get_varid(varname));
                 }
                 else
@@ -733,7 +724,7 @@ static vartype eval_expr(char *str)
 
                     /* isolate the variable name into a buffer */
                     char varname[VARNAME_MAX + 1] = { 0 };
-                    memcpy(varname, str, expr - tstart);
+                    memcpy(varname, tstart, expr - tstart);
                     write_varid(get_varid(varname));
                 }
                 else
@@ -762,7 +753,7 @@ static vartype eval_expr(char *str)
 
             /* isolate the variable name into a buffer */
             char varname[VARNAME_MAX + 1] = { 0 };
-            memcpy(varname, str, expr - tstart);
+            memcpy(varname, tstart, expr - tstart);
             write_varid(get_varid(varname));
         }
         else
@@ -938,6 +929,7 @@ static int logvar_handler(char **save)
 static int rem_handler(char **save)
 {
     (void) save;
+    vid_logf("REM, skipping line");
     return BREAK;
 }
 
@@ -1179,6 +1171,7 @@ static void init_globals(void)
     file_des = -1;
     stack_frame = 0;
     current_line = 0;
+    bytes_written = 0;
 }
 
 void ducky_compile(int fd, bool verbose, int out)
@@ -1201,20 +1194,33 @@ void ducky_compile(int fd, bool verbose, int out)
     init_optable();
     init_tokmap();
 
-    /* initialize some other constants */
-    //setVariable("true", 1);
-    //setConst("true", true);
-
-    //setVariable("false", 0);
-    //setConst("false", true);
-
     line_offset = index_lines(file_des, &num_lines);
+    write_imm(0x4475634B);
+    write_imm(num_lines);
+    off_t linetab_off = bytes_written;
+    for(unsigned i = 1; i <= num_lines; ++i)
+    {
+        write_imm(0);
+    }
     if(verbose)
     {
         vid_logf("Indexing complete (%u lines).", num_lines);
         vid_logf("Compiling...");
     }
+
+    /* initialize some other constants */
+
+    setVariable("true", 1);
+    setConst("true", true);
+
+    setVariable("false", 0);
+    setConst("false", true);
+
+    /* initialize labels (using output from index_lines) */
+    index_labels(file_des);
+
     int repeats_left = 0;
+    off_t code_start = bytes_written;
 
     while(1)
     {
@@ -1232,7 +1238,9 @@ void ducky_compile(int fd, bool verbose, int out)
 
         char *buf = instr_buf;
 
-        /* execute all the commands on this line/instruction */
+        line_offset[current_line] = bytes_written;
+
+        /* compile all the commands on this line/instruction */
         do {
             tok = strtok_r(buf, " -\t", &save);
             buf = NULL;
@@ -1269,6 +1277,13 @@ void ducky_compile(int fd, bool verbose, int out)
     }
 
 done:
+
+    /* go back and fill in the offset table */
+    lseek(out_fd, linetab_off, SEEK_SET);
+    for(unsigned i = 1; i <= num_lines; ++i)
+    {
+        write_imm(line_offset[i]);
+    }
 
     return;
 }

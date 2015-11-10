@@ -1,4 +1,5 @@
 #include <platform.h>
+#include <ducky.h>
 
 /*******************************************************************************
  * The scripting language implemented here is an extension of DuckyScript.
@@ -43,8 +44,6 @@
 #define ARRAYLEN(x) (sizeof(x)/sizeof(x[0]))
 
 #define MIN(x,y) ((x<y)?(x):(y))
-
-typedef long long int vartype;
 
 /*** Globals ***/
 
