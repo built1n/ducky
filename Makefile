@@ -2,9 +2,11 @@ CC = gcc
 OUT = build
 PLATFORM = unix
 
-DUCKY_OBJ = src/interp.o
+DUCKY_OBJ = src/interp.o src/compile.o
 
 CFLAGS = -lbsd -lm -Og -g -I src/ -I target/$(PLATFORM)
+
+all: $(OUT)/$(PLATFORM).bin
 
 $(OUT)/$(PLATFORM).bin: $(DUCKY_OBJ) target/$(PLATFORM)/main.o Makefile
 	mkdir -p $(OUT)

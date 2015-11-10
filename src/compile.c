@@ -1,29 +1,28 @@
+#include <ducky.h>
 #include <platform.h>
 
+#include "opcodes.h"
+
 /*******************************************************************************
- * The scripting language implemented here is an extension of DuckyScript.
- * DuckyScript as it is now is limited to simple tasks, as it lacks good flow
- * control or variable support.
- *
- * These following extensions to DuckyScript are (to be) implemented.
- *
- * Variables: variable names consist of all characters that are not operators
- *            or digits. The limit on variable names is 24 characters.
- *
- * NOTE: to have a command on a line following a command using an expression, a
- *       semicolon (;) is needed to separate them.
- *
- * "JUMP <EXPR>;" - jumps to line <EXPR> in the file
- *
- * "IF <CONDITION>;" - if <CONDITION> equals zero, skip the rest of the line
- *
- * "LET X=<EXPR>;" - loads the value of <EXPR> into variable X. Greedy.
- *
- * "LOG ..." - outputs any remaining text to the device's screen.
- * "LOGVAR <EXPR>;" - outputs variable <EXPR> in decimal to the device's screen
- * "NEWLINE" - outputs a newline
- * "LOGCHAR <EXPR>;" - outputs <EXPR> as an ASCII character
- ******************************************************************************/
+ * Bytecode format:
+ * { <INSTRUCTION> <ARGS> }...
+ * 0x00 - delay S[0] ms, pop
+ * 0x01 <A16> - mark as constant - vars[A].const = true
+ * 0x02 <A16> - push vars[A]
+ * 0x03 <B32> - push *B
+ * 0x04 <A16> - pop into vars[A]
+ * 0x05 - add the two numbers on top of the stack
+ * 0x06 - subtract the number on the top of the stack from the one below it
+ * 0x07 - multiply the two numbers on top of the stack
+ * 0x08 - S[1]/S[0]
+ * 0x09 - jump to S[0]; pop
+ * 0x0A - if S[1] == 0; JUMP S[0]; pop both
+ * 0x0B - eval S[1] ** S[0]
+ * 0x0C - eval S[1] && S[0]
+ * 0x0D - eval S[1] & S[0]
+ * 0x0E - eval S[1] << S[0]
+ * REPEAT: exec line s[0] s[1] times
+ */
 
 /*** Defines ***/
 
@@ -55,106 +54,88 @@ static unsigned lines_executed = 0, current_line = 0, num_lines;
 static unsigned call_stack[CALL_STACK_SZ];
 static unsigned stack_frame = 0;
 
-static int file_des = -1;
+static int file_des = -1, out_fd = -1;
 
-struct varnode_t {
-    char name[VARNAME_MAX + 1];
-    vartype val;
-    bool constant; /* used by setVariable */
-    struct varnode_t *next;
+struct var_t {
+    char name[VARNAME_MAX];
+    bool constant;
 };
 
 static void error(const char *fmt, ...) __attribute__((noreturn,format(print,1,2)));
 static void vid_write(const char *str);
-static void vid_writef(const char *fmt, ...) __attribute__((format(printf,1,2)));
+static void vid_logf(const char *fmt, ...) __attribute__((format(printf,1,2)));
 static void debug(const char *fmt, ...) __attribute__((format(printf,1,2)));
 static bool isValidVariable(const char *c);
 
 /* variables are stored in a chained hash map */
 /* collisions are manageable, but should be minimized */
 
-static struct varnode_t *var_map[VARMAP_SIZE];
+#define MAX_VARS 65336
+static struct var_t vars[MAX_VARS];
 
-/* simple DJB hash */
-static uint32_t var_hash(const char *str)
+void write_instr(instr_t ins)
 {
-    uint32_t hash = 5381;
-    char c;
-    while((c = *str++))
-    {
-        hash = ((hash << 5) + hash) ^ c;
-    }
-
-    return hash;
+    write(out_fd, &ins, sizeof(ins));
+    vid_logf("writing instruction 0x%x", ins);
 }
 
-static struct varnode_t *lookup_var(const char *name)
+void write_imm(imm_t imm)
 {
-    uint32_t hash = var_hash(name) % VARMAP_SIZE;
-
-    struct varnode_t *iter = var_map[hash];
-    struct varnode_t *last = NULL;
-
-    while(iter)
-    {
-        if(strcmp(iter->name, name) == 0)
-            return iter;
-        last = iter;
-        iter = iter->next;
-    }
-
-    /* not found in this bucket, so add it to the linked list */
-    struct varnode_t *new = malloc(sizeof(struct varnode_t));
-
-    memset(new, 0, sizeof(struct varnode_t));
-    strlcpy(new->name, name, sizeof(new->name));
-    new->val = 0;
-    new->constant = false;
-    new->next = NULL;
-
-    if(!last)
-        var_map[hash] = new;
-    else
-        last->next = new;
-
-    return new;
+    write(out_fd, &imm, sizeof(imm));
+    vid_logf("writing immediate 0x%x", imm);
 }
 
-static vartype getVariable(const char *name)
+void write_byte(unsigned char c)
 {
-    return lookup_var(name)->val;
+    write(out_fd, &c, 1);
+    vid_logf("writing byte '%c'", c);
+}
+
+void write_varid(varid_t varid)
+{
+    write(out_fd, &varid, sizeof(varid));
+    vid_logf("writing varid %d which is %s", varid, vars[varid].name);
+}
+
+varid_t get_varid(const char *name)
+{
+    /* VERY VERY SLOW ALGORITHM, but it works */
+    static int last_assigned_var = 0;
+    for(int i = 0; i < last_assigned_var; ++i)
+        if(strcmp(name, vars[i].name) == 0)
+            return i;
+    strlcpy(vars[last_assigned_var].name, name, VARNAME_MAX);
+    ++last_assigned_var;
+    return last_assigned_var - 1;
 }
 
 static void setVariable(const char *name, vartype val)
 {
-    struct varnode_t *node = lookup_var(name);
-    if(!node->constant)
-        node->val = val;
-    else
-        error("attempted to modify a constant variable");
+    write_instr(PUSHIMM);
+    write_imm(val);
+    write_instr(POP);
+    write_varid(get_varid(name));
 }
 
 static void setConst(const char *name, bool c)
 {
-    lookup_var(name)->constant = c;
+    if(c)
+    {
+        write_instr(MKCONST);
+        write_varid(get_varid(name));
+    }
 }
 
 static void incVar(const char *name)
 {
-    struct varnode_t *node = lookup_var(name);
-    if(!node->constant)
-        ++lookup_var(name)->val;
-    else
-        error("attempted to modify a constant variable");
+    write_instr(INCVAR);
+    write_varid(get_varid(name));
 }
 
 static void decVar(const char *name)
 {
-    struct varnode_t *node = lookup_var(name);
-    if(!node->constant)
-        --lookup_var(name)->val;
-    else
-        error("attempted to modify a constant variable");
+    write_instr(DECVAR);
+    write_varid(get_varid(name));
 }
 
 /*** Utility functions ***/
@@ -165,32 +146,26 @@ static void exit_handler(void)
         close(file_des);
     if(line_offset)
         free(line_offset);
-    /* free all our variables */
-    for(int i = 0; i < VARMAP_SIZE; ++i)
-    {
-        struct varnode_t *iter = var_map[i], *next;
-        while(iter)
-        {
-            next = iter->next;
-            free(iter);
-            iter = next;
-        }
-    }
 }
 
 static void vid_write(const char *str)
 {
-    printf("%s", str);
+    write_instr(WRITE_STR);
+    while(*str)
+    {
+        write_byte(*str++);
+    }
+    write_byte('\0');
 }
 
-static void __attribute__((format(printf,1,2))) vid_writef(const char *fmt, ...)
+static void __attribute__((format(printf,1,2))) vid_logf(const char *fmt, ...)
 {
     char fmtbuf[256];
 
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);
-    vid_write(fmtbuf);
+    printf("%s\n", fmtbuf);
     va_end(ap);
 }
 
@@ -202,8 +177,8 @@ static void __attribute__((noreturn,format(printf,1,2))) error(const char *fmt, 
     va_start(ap, fmt);
     vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);
     if(current_line)
-        vid_writef("Line %d: ", current_line);
-    vid_writef("ERROR: %s\n",  fmtbuf);
+        vid_logf("Line %d: ", current_line);
+    vid_logf("ERROR: %s\n",  fmtbuf);
     va_end(ap);
 
     exit(EXIT_FAILURE);
@@ -216,7 +191,7 @@ static void __attribute__((format(printf,1,2))) warning(const char *fmt, ...)
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);
-    vid_writef("Line %d: WARNING: %s\n", current_line, fmtbuf);
+    vid_logf("Line %d: WARNING: %s\n", current_line, fmtbuf);
     va_end(ap);
 }
 
@@ -279,7 +254,7 @@ static off_t *index_lines(int fd, unsigned *numlines)
             if(tok && isValidVariable(tok))
             {
                 setVariable(tok, idx);
-                lookup_var(tok)->constant = true;
+                setConst(tok, true);
             }
         }
 
@@ -329,107 +304,97 @@ static void sub_return(int fd)
 
 /* based on http://en.literateprograms.org/Shunting_yard_algorithm_%28C%29 */
 
-static vartype eval_uminus(vartype a1, vartype a2)
+static void eval_uminus(void)
 {
-    (void) a2;
-    return -a1;
+    write_instr(NEG);
 }
-static vartype eval_exp(vartype a1, vartype a2)
+static void eval_exp(void)
 {
-    return a2<0 ? 0 : (a2==0?1:a1*eval_exp(a1, a2-1));
+    write_instr(POW);
 }
-static vartype eval_mul(vartype a1, vartype a2)
+static void eval_mul(void)
 {
-    return a1*a2;
+    write_instr(MULT);
 }
-static vartype eval_div(vartype a1, vartype a2)
+static void eval_div(void)
 {
-    if(!a2) {
-        error("division by zero");
-    }
-    return a1/a2;
+    write_instr(DIV);
 }
-static vartype eval_mod(vartype a1, vartype a2)
+static void eval_mod(void)
 {
-    if(!a2) {
-        error("division by zero");
-    }
-    return a1%a2;
+    write_instr(MOD);
 }
-static vartype eval_add(vartype a1, vartype a2)
+static void eval_add(void)
 {
-    return a1+a2;
+    write_instr(ADD);
 }
-static vartype eval_sub(vartype a1, vartype a2)
+static void eval_sub(void)
 {
-    return a1-a2;
+    write_instr(SUB);
 }
-static vartype eval_eq(vartype a1, vartype a2)
+static void eval_eq(void)
 {
-    return a1 == a2;
+    write_instr(EQ);
 }
-static vartype eval_neq(vartype a1, vartype a2)
+static void eval_neq(void)
 {
-    return a1 != a2;
+    write_instr(NEQ);
 }
-static vartype eval_leq(vartype a1, vartype a2)
+static void eval_leq(void)
 {
-    return a1 <= a2;
+    write_instr(LEQ);
 }
-static vartype eval_geq(vartype a1, vartype a2)
+static void eval_geq(void)
 {
-    return a1 >= a2;
+    write_instr(GEQ);
 }
-static vartype eval_lt(vartype a1, vartype a2)
+static void eval_lt(void)
 {
-    return a1 < a2;
+    write_instr(LT);
 }
-static vartype eval_gt(vartype a1, vartype a2)
+static void eval_gt(void)
 {
-    return a1 > a2;
+    write_instr(GT);
 }
-static vartype eval_log_neg(vartype a1, vartype a2)
+static void eval_log_neg(void)
 {
-    (void) a2;
-    return !a1;
+    write_instr(LOGNOT);
 }
-static vartype eval_log_and(vartype a1, vartype a2)
+static void eval_log_and(void)
 {
-    return a1 && a2;
+    write_instr(LOGAND);
 }
-static vartype eval_log_or(vartype a1, vartype a2)
+static void eval_log_or(void)
 {
-    return a1 || a2;
+    write_instr(LOGOR);
 }
-static vartype eval_bit_and(vartype a1, vartype a2)
+static void eval_bit_and(void)
 {
-    return a1 & a2;
+    write_instr(BITAND);
 }
-static vartype eval_bit_xor(vartype a1, vartype a2)
+static void eval_bit_xor(void)
 {
-    return a1 ^ a2;
+    write_instr(BITXOR);
 }
-static vartype eval_bit_or(vartype a1, vartype a2)
+static void eval_bit_or(void)
 {
-    return a1 | a2;
+    write_instr(BITOR);
 }
-static vartype eval_bit_comp(vartype a1, vartype a2)
+static void eval_bit_comp(void)
 {
-    (void) a2;
-    return ~a1;
+    write_instr(BITCOMP);
 }
-static vartype eval_lsh(vartype a1, vartype a2)
+static void eval_lsh(void)
 {
-    return a1 << a2;
+    write_instr(LSH);
 }
-static vartype eval_rsh(vartype a1, vartype a2)
+static void eval_rsh(void)
 {
-    return a1 >> a2;
+    write_instr(RSH);
 }
-static vartype eval_sqrt(vartype a1, vartype a2)
+static void eval_sqrt(void)
 {
-    (void) a2;
-    return sqrt(a1);
+    write_instr(SQRT);
 }
 
 enum {ASSOC_NONE=0, ASSOC_LEFT, ASSOC_RIGHT};
@@ -465,7 +430,7 @@ static struct op_s {
     int prec;
     int assoc;
     int unary;
-    vartype (*eval)(vartype a1, vartype a2);
+    void (*eval)(void);
     unsigned int len;
 } ops[] = {
     {"+",     20,  ASSOC_LEFT,   0,  eval_add,       -1},
@@ -603,7 +568,7 @@ static bool isDigit(char c)
 
 static bool isValidNumber(char *str)
 {
-    //vid_writef("isValidNumber %s", str);
+    //vid_logf("isValidNumber %s", str);
     if(str && (isDigit(*str) || *str == '-'))
     {
         while(1)
@@ -621,13 +586,13 @@ static bool isValidNumber(char *str)
 
 static bool isSpace(char c)
 {
-    //vid_writef("isSpace '%c'", c);
+    //vid_logf("isSpace '%c'", c);
     return (c == ' ') || (c == '\t');
 }
 
 static bool isValidVariable(const char *c)
 {
-    //vid_writef("isValidVariable %s", c);
+    //vid_logf("isValidVariable %s", c);
     if(!isDigit(*c) && !getop(c, NULL) && !isSpace(*c))
     {
         return true;
@@ -635,22 +600,9 @@ static bool isValidVariable(const char *c)
     return false;
 }
 
-static vartype getValue(char *str, char *cur)
-{
-    //vid_writef("getValue %s", str);
-    if(str && isValidVariable(str))
-    {
-        /* isolate the variable name into a buffer */
-        char varname[VARNAME_MAX + 1] = { 0 };
-        memcpy(varname, str, cur - str);
-        return getVariable(varname);
-    }
-    return strtol(str, NULL, 0);
-}
-
 static bool isValidNumberOrVariable(const char *c)
 {
-    //vid_writef("isValidNumberOrVariable %s", c);
+    //vid_logf("isValidNumberOrVariable %s", c);
     if(isDigit(*c) || isValidVariable(c))
     {
         return true;
@@ -672,15 +624,7 @@ static void shunt_op(const struct op_s *op)
         while(nopstack > 0 && strcmp(opstack[nopstack-1]->op, "(") != 0)
         {
             pop = pop_opstack();
-            n1  = pop_numstack();
-
-            if(pop->unary)
-                push_numstack(pop->eval(n1, 0));
-            else
-            {
-                n2 = pop_numstack();
-                push_numstack(pop->eval(n2, n1));
-            }
+            pop->eval();
         }
 
         if(!(pop = pop_opstack()) || strcmp(pop->op,"(") != 0)
@@ -695,14 +639,7 @@ static void shunt_op(const struct op_s *op)
         while(nopstack && op->prec <= opstack[nopstack - 1]->prec)
         {
             pop = pop_opstack();
-            n1  = pop_numstack();
-            if(pop->unary)
-                push_numstack(pop->eval(n1, 0));
-            else
-            {
-                n2 = pop_numstack();
-                push_numstack(pop->eval(n2, n1));
-            }
+            pop->eval();
         }
     }
     else
@@ -710,14 +647,7 @@ static void shunt_op(const struct op_s *op)
         while(nopstack && op->prec<opstack[nopstack - 1]->prec)
         {
             pop = pop_opstack();
-            n1  = pop_numstack();
-            if(pop->unary)
-                push_numstack(pop->eval(n1, 0));
-            else
-            {
-                n2 = pop_numstack();
-                push_numstack(pop->eval(n2, n1));
-            }
+            pop->eval();
         }
     }
 
@@ -738,9 +668,6 @@ static vartype eval_expr(char *str)
     const struct op_s *op = NULL;
     vartype n1, n2;
     const struct op_s *lastop = &startop;
-
-    nopstack = 0;
-    nnumstack = 0;
 
     int len;
     char *expr;
@@ -778,13 +705,43 @@ static vartype eval_expr(char *str)
         {
             if(isSpace(*expr))
             {
-                push_numstack(getValue(tstart, expr));
+                //push_numstack(getValue(tstart, expr));
+
+                if(isValidVariable(tstart))
+                {
+                    write_instr(PUSHVAR);
+
+                    /* isolate the variable name into a buffer */
+                    char varname[VARNAME_MAX + 1] = { 0 };
+                    memcpy(varname, str, expr - tstart);
+                    write_varid(get_varid(varname));
+                }
+                else
+                {
+                    write_instr(PUSHIMM);
+                    write_imm(strtol(tstart, NULL, 0));
+                }
                 tstart = NULL;
                 lastop = NULL;
             }
             else if((op = getop(expr, &len)))
             {
-                push_numstack(getValue(tstart, expr));
+                //push_numstack(getValue(tstart, expr));
+                if(isValidVariable(tstart))
+                {
+                    write_instr(PUSHVAR);
+
+                    /* isolate the variable name into a buffer */
+                    char varname[VARNAME_MAX + 1] = { 0 };
+                    memcpy(varname, str, expr - tstart);
+                    write_varid(get_varid(varname));
+                }
+                else
+                {
+                    write_instr(PUSHIMM);
+                    write_imm(strtol(tstart, NULL, 0));
+                }
+
                 tstart = NULL;
                 shunt_op(op);
                 lastop = op;
@@ -797,25 +754,28 @@ static vartype eval_expr(char *str)
     }
 
     if(tstart)
-        push_numstack(getValue(tstart, expr));
+    {
+        //push_numstack(getValue(tstart, expr));
+        if(isValidVariable(tstart))
+        {
+            write_instr(PUSHVAR);
+
+            /* isolate the variable name into a buffer */
+            char varname[VARNAME_MAX + 1] = { 0 };
+            memcpy(varname, str, expr - tstart);
+            write_varid(get_varid(varname));
+        }
+        else
+        {
+            write_instr(PUSHIMM);
+            write_imm(strtol(tstart, NULL, 0));
+        }
+    }
 
     while(nopstack) {
         op = pop_opstack();
-        n1 = pop_numstack();
-        if(!op->unary)
-        {
-            n2 = pop_numstack();
-            push_numstack(op->eval(n2, n1));
-        }
-        else
-            push_numstack(op->eval(n1, 0));
+        op->eval();
     }
-
-    if(nnumstack != 1) {
-        error("invalid expression");
-    }
-
-    return numstack[0];
 }
 
 #define OK 0
@@ -823,22 +783,22 @@ static vartype eval_expr(char *str)
 #define NEXT 2
 #define BREAK 3
 
-static int let_handler(char **save, int *repeats_left)
+static int let_handler(char **save)
 {
-    (void) save; (void) repeats_left;
+    (void) save;
     char *varname = strtok_r(NULL, "= \t", save);
 
     if(varname && isValidVariable(varname))
     {
-        struct varnode_t *node = lookup_var(varname);
-        if(node->constant)
-            error("attempted to modify a constant variable");
-
+        int varid = get_varid(varname);
         char *tok = strtok_r(NULL, "=;", save);
         if(tok)
-            node->val = eval_expr(tok);
+            eval_expr(tok);
         else
             error("exprected valid expression after LET");
+
+        write_instr(POP);
+        write_varid(varid);
     }
     else
     {
@@ -847,101 +807,104 @@ static int let_handler(char **save, int *repeats_left)
     return OK;
 }
 
-static int repeat_handler(char **save, int *repeats_left)
+static int repeat_handler(char **save)
 {
-    (void) save; (void) repeats_left;
+    (void) save;
     char *tok = strtok_r(NULL, ";", save);
     if(tok)
     {
-        if(current_line == 1)
-            error("REPEAT without a previous instruction");
-        *repeats_left = eval_expr(tok) - 1;
-        jump_line(file_des, current_line - 1);
-        return NEXT;
+        eval_expr(tok);
+        write_instr(PUSHIMM);
+        write_imm(current_line - 1);
+        write_instr(REPEAT);
+        return OK;
     }
     else
         error("expected valid expression after REPEAT");
 }
 
-static int goto_handler(char **save, int *repeats_left)
+static int goto_handler(char **save)
 {
-    (void) save; (void) repeats_left;
+    (void) save;
     char *tok = strtok_r(NULL, ";", save);
     if(tok)
     {
-        jump_line(file_des, eval_expr(tok));
-        return NEXT;
+        eval_expr(tok);
+        write_instr(JUMP);
+        return OK;
     }
     else
         error("expected valid expression after GOTO");
 }
 
-static int call_handler(char **save, int *repeats_left)
+static int call_handler(char **save)
 {
-    (void) save; (void) repeats_left;
+    (void) save;
     char *tok = strtok_r(NULL, "", save);
     if(tok)
     {
-        sub_call(file_des, eval_expr(tok));
-        return NEXT;
+        eval_expr(tok);
+        write_instr(SUBCALL);
+        //sub_call(file_des, eval_expr(tok));
+        return OK;
     }
     else
         error("expected destination for CALL");
 }
 
-static int ret_handler(char **save, int *repeats_left)
+static int ret_handler(char **save)
 {
-    (void) save; (void) repeats_left;
-    sub_return(file_des);
+    (void) save;
+    write_instr(SUBRET);
+    //sub_return(file_des);
     return NEXT;
 }
 
-static int inc_handler(char **save, int *repeats_left)
+static int inc_handler(char **save)
 {
-    (void) save; (void) repeats_left;
+    (void) save;
     char *tok = strtok_r(NULL, " \t", save);
+
     if(isValidVariable(tok))
         incVar(tok);
     return OK;
 }
 
-static int dec_handler(char **save, int *repeats_left)
+static int dec_handler(char **save)
 {
-    (void) save; (void) repeats_left;
+    (void) save;
     char *tok = strtok_r(NULL, " \t", save);
+
     if(isValidVariable(tok))
         decVar(tok);
     return OK;
 }
 
-static int if_handler(char **save, int *repeats_left)
+static int if_handler(char **save)
 {
-    (void) save; (void) repeats_left;
+    (void) save;
     char *tok = strtok_r(NULL, ";", save);
 
     if(!tok)
         error("expected conditional after IF");
 
-    /* break out of the do-while if the condition is false */
-    if(!eval_expr(tok))
-    {
-        return BREAK;
-    }
+    eval_expr(tok);
+    write_instr(PUSHIMM);
+    write_imm(current_line + 1);
+    write_instr(IF);
+
     return OK;
 }
 
-static int delay_handler(char **save, int *repeats_left)
+static int delay_handler(char **save)
 {
-    (void) save; (void) repeats_left;
+    (void) save;
     /* delay N 1000ths of a sec */
     char *tok = strtok_r(NULL, ";", save);
     if(tok)
     {
-        int ms = eval_expr(tok);
-        struct timespec t;
-        t.tv_sec = ms / 1000;
-        t.tv_nsec = (ms % 1000) * 1000000;
-        nanosleep(&t, NULL);
+        eval_expr(tok);
+        write_instr(DELAY);
     }
     else
         error("expected valid expression after DELAY");
@@ -949,54 +912,56 @@ static int delay_handler(char **save, int *repeats_left)
     return OK;
 }
 
-static int log_handler(char **save, int *repeats_left)
+static int log_handler(char **save)
 {
-    (void) save; (void) repeats_left;
+    (void) save;
     char *tok = strtok_r(NULL, "", save);
 
     vid_write(tok);
     return OK;
 }
 
-static int logvar_handler(char **save, int *repeats_left)
+static int logvar_handler(char **save)
 {
-    (void) save; (void) repeats_left;
+    (void) save;
     char *tok = strtok_r(NULL, ";", save);
     if(tok)
     {
-        vid_writef(VARFORMAT, eval_expr(tok));
+        eval_expr(tok);
+        write_instr(LOGVAR);
         return OK;
     }
     else
         error("expected expression after LOGVAR");
 }
 
-static int rem_handler(char **save, int *repeats_left)
+static int rem_handler(char **save)
 {
-    (void) save; (void) repeats_left;
+    (void) save;
     return BREAK;
 }
 
-static int quit_handler(char **save, int *repeats_left)
+static int quit_handler(char **save)
 {
-    (void) save; (void) repeats_left;
-    return DONE;
+    (void) save;
+    write_instr(QUIT);
+    return OK;
 }
 
-static int newline_handler(char **save, int *repeats_left)
+static int newline_handler(char **save)
 {
-    (void) save; (void) repeats_left;
+    (void) save;
     vid_write("\n");
     return OK;
 }
 
-static int logchar_handler(char **save, int *repeats_left)
+static int logchar_handler(char **save)
 {
-    (void) repeats_left;
     char *tok = strtok_r(NULL, ";", save);
     if(tok)
     {
-        vid_writef("%c", eval_expr(tok));
+        eval_expr(tok);
+        write_instr(LOGASCII);
         return OK;
     }
     else
@@ -1006,7 +971,7 @@ static int logchar_handler(char **save, int *repeats_left)
 
 static struct token_t {
     const char *tok;
-    int (*func)(char **save, int *repeats_left);
+    int (*func)(char **save);
 } tokens[] = {
     { "LET",     let_handler,     },
     { "REPEAT",  repeat_handler,  },
@@ -1213,23 +1178,20 @@ static void init_globals(void)
     line_offset = NULL;
     file_des = -1;
     stack_frame = 0;
-    lines_executed = 0;
     current_line = 0;
-    memset(var_map, 0, sizeof(var_map));
 }
 
-void ducky_main(int fd, bool verbose)
+void ducky_compile(int fd, bool verbose, int out)
 {
     init_globals();
 
     if(verbose)
     {
-        vid_write("*** DS-2 INIT ***");
-        vid_write("QUACK AT YOUR OWN RISK!");
-        vid_write("The author assumes no liability for any damages caused by this program.");
+        vid_logf("COMPILER INIT");
     }
 
     file_des = fd;
+    out_fd = out;
 
     atexit(exit_handler);
 
@@ -1239,25 +1201,18 @@ void ducky_main(int fd, bool verbose)
     init_optable();
     init_tokmap();
 
-    /* initialize the "." variable, which is the line counter */
-    setVariable(".", 0);
-    setConst(".", true);
-
-    struct varnode_t *dot_var = lookup_var(".");
-
     /* initialize some other constants */
-    setVariable("true", 1);
-    setConst("true", true);
+    //setVariable("true", 1);
+    //setConst("true", true);
 
-    setVariable("false", 0);
-    setConst("false", true);
+    //setVariable("false", 0);
+    //setConst("false", true);
 
     line_offset = index_lines(file_des, &num_lines);
     if(verbose)
     {
-        vid_writef("Indexing complete (%u lines).", num_lines);
-
-        vid_write("Executing...");
+        vid_logf("Indexing complete (%u lines).", num_lines);
+        vid_logf("Compiling...");
     }
     int repeats_left = 0;
 
@@ -1268,14 +1223,12 @@ void ducky_main(int fd, bool verbose)
         if(read_line(file_des, instr_buf, sizeof(instr_buf)) <= 0)
         {
             if(verbose)
-                vid_writef("end of file");
+                vid_logf("end of file");
             goto done;
         }
         char *tok = NULL, *save = NULL;
 
         ++current_line;
-        dot_var->val = current_line;
-        ++lines_executed;
 
         char *buf = instr_buf;
 
@@ -1290,7 +1243,7 @@ void ducky_main(int fd, bool verbose)
             int hash = tok_hash(tok) % TOKMAP_SIZE;
             struct token_t *t = tokmap+hash;
             if(hash >= 0 && strcmp(t->tok, tok) == 0)
-                switch(tokmap[hash].func(&save, &repeats_left))
+                switch(tokmap[hash].func(&save))
                 {
                 case OK:
                     break;
@@ -1310,19 +1263,7 @@ void ducky_main(int fd, bool verbose)
             }
         } while(tok);
     break_out:
-
-        if(repeats_left > 0)
-        {
-            --repeats_left;
-            if(repeats_left)
-                jump_line(file_des, current_line);
-            else
-            {
-                if(current_line + 2 > num_lines)
-                    goto done;
-                jump_line(file_des, current_line + 2);
-            }
-        }
+        ;
     next_line:
         ;
     }
