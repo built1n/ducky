@@ -46,6 +46,8 @@ static off_t *line_offset = NULL;
 
 static unsigned lines_executed = 0, current_line = 0, num_lines;
 
+static unsigned repeat_line;
+
 static unsigned call_stack[CALL_STACK_SZ];
 static unsigned stack_frame = 0;
 
@@ -843,18 +845,31 @@ static int let_handler(char **save, int *repeats_left)
 
 static int repeat_handler(char **save, int *repeats_left)
 {
-    (void) save; (void) repeats_left;
-    char *tok = strtok_r(NULL, ";", save);
-    if(tok)
+    (void) save;
+    if(*repeats_left > 0)
     {
-        if(current_line == 1)
-            error("REPEAT without a previous instruction");
-        *repeats_left = eval_expr(tok) - 1;
-        jump_line(file_des, current_line - 1);
-        return NEXT;
+        --(*repeats_left);
+        if(*repeats_left)
+            jump_line(file_des, repeat_line);
     }
     else
-        error("expected valid expression after REPEAT");
+    {
+        char *tok = strtok_r(NULL, ";", save);
+        if(tok)
+        {
+            if(current_line == 1)
+                error("REPEAT without a previous instruction");
+            *repeats_left = eval_expr(tok) - 1;
+            if(*repeats_left)
+            {
+                repeat_line = current_line - 1;
+                jump_line(file_des, repeat_line);
+            }
+        }
+        else
+            error("expected valid expression after REPEAT");
+    }
+    return NEXT;
 }
 
 static int goto_handler(char **save, int *repeats_left)
@@ -1304,7 +1319,7 @@ void ducky_main(int fd, bool verbose)
             }
         } while(tok);
     break_out:
-
+        #if 0
         if(repeats_left > 0)
         {
             --repeats_left;
@@ -1317,6 +1332,7 @@ void ducky_main(int fd, bool verbose)
                 jump_line(file_des, current_line + 2);
             }
         }
+        #endif
     next_line:
         ;
     }

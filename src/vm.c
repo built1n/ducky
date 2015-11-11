@@ -138,8 +138,10 @@ static inline vartype getvar(varid_t varid)
 
 static inline void setvar(varid_t varid, vartype val)
 {
-    if(varid < ARRAYLEN(vars))
+    if(varid < ARRAYLEN(vars) && !vars[varid].constant)
         vars[varid].val = val;
+    else
+        error("cannot modify variable");
 }
 
 static inline void mkconst(varid_t varid)
@@ -267,11 +269,8 @@ void logascii_handler(void)
     vid_writef("%c", pop());
 }
 
-#define CHECKSTACK(x) if(stack_pointer<x)error("not enough elements on stack");
-
 void neg_handler(void)
 {
-    CHECKSTACK(1);
     stack[stack_pointer - 1] = -stack[stack_pointer - 1];
 }
 
@@ -428,6 +427,14 @@ void sqrt_handler(void)
     push(sqrt(pop()));
 }
 
+void decl_const(void)
+{
+    /* no checking, only the compiler can output this instruction */
+    varid_t varid = read_varid();
+    vars[varid].val = read_imm();
+    vars[varid].constant = true;
+}
+
 void inc_line_pointer(void)
 {
     ++current_line;
@@ -488,7 +495,7 @@ static void (*instr_tab[0x100])(void) = {
     lsh_handler,       /*  0x24  */
     rsh_handler,       /*  0x25  */
     sqrt_handler,      /*  0x26  */
-    NULL,              /*  0x27  */
+    decl_const,        /*  0x27  */
     NULL,              /*  0x28  */
     NULL,              /*  0x29  */
     NULL,              /*  0x2a  */

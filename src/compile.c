@@ -109,6 +109,13 @@ static void setVariable(const char *name, vartype val)
     write_varid(get_varid(name));
 }
 
+static void makeConstantVariable(const char *name, vartype val)
+{
+    write_instr(DECL_CONST);
+    write_varid(get_varid(name));
+    write_imm(val);
+}
+
 static void setConst(const char *name, bool c)
 {
     if(c)
@@ -743,7 +750,7 @@ static vartype eval_expr(char *str)
             }
         }
     }
-
+    
     if(tstart)
     {
         //push_numstack(getValue(tstart, expr));
@@ -1210,14 +1217,10 @@ void ducky_compile(int fd, bool verbose, int out)
 
     /* initialize some other constants */
 
-    setVariable(".", 0);
-    setConst(".", true);
-
-    setVariable("true", 1);
-    setConst("true", true);
-
-    setVariable("false", 0);
-    setConst("false", true);
+    makeConstantVariable(".", 0);
+    
+    makeConstantVariable("true", 1);
+    makeConstantVariable("false", 0);
 
     /* initialize labels (using output from index_lines) */
     index_labels(file_des);
