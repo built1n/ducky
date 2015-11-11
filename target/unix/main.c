@@ -1,33 +1,59 @@
 #include <ducky.h>
 #include <platform.h>
 
+#define COMPILE 1
+#define INTERP 2
+#define EXECUTE 3
+
+char *progname;
+
+void arg_error(void)
+{
+    printf("Usage: %s [-c] FILE\n", progname);
+    exit(EXIT_FAILURE);
+}
+
 int main(int argc, char *argv[])
 {
+    int action = INTERP;
+    progname = argv[0];
+    char *file = NULL;
     if(argc >= 2)
     {
-        if(strcmp(argv[1], "-c") == 0)
+        for(int i = 1; i < argc; ++i)
         {
-            if(argc == 3)
-            {
-                int fd = open(argv[2], O_RDONLY);
-                int out_fd = open("a.out", O_WRONLY | O_CREAT, 0644);
-                ducky_compile(fd, true, out_fd);
-                close(fd);
-                close(out_fd);
-            }
+            if(!strcmp(argv[i], "-c"))
+                action = COMPILE;
+            else if(!strcmp(argv[i], "-i"))
+                action = INTERP;
+            else if(!strcmp(argv[i], "-e"))
+                action = EXECUTE;
             else
-                printf("expected filename\n");
+                file = argv[i];
         }
-        else
+        if(file)
         {
-            int fd = open(argv[1], O_RDONLY);
-            ducky_main(fd, false);
-            close(fd);
+            int fd = open(file, O_RDONLY), out_fd;
+            switch(action)
+            {
+            case INTERP:
+                ducky_main(fd, false);
+                break;
+            case COMPILE:
+                out_fd = open("a.out", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                ducky_compile(fd, false, out_fd);
+                break;
+            case EXECUTE:
+                ducky_vm(fd);
+                break;
+            default:
+                break;
+            }
         }
     }
     else
     {
-        printf("Usage: %s [-c] FILE\n", argv[0]);
+        arg_error();
     }
     return 0;
 }

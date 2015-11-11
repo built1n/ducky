@@ -37,3 +37,4 @@
 #define LSH        0x24
 #define RSH        0x25
 #define SQRT       0x26
+#define LINEMARK   0xFF

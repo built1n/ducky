@@ -1195,7 +1195,7 @@ void ducky_compile(int fd, bool verbose, int out)
     init_tokmap();
 
     line_offset = index_lines(file_des, &num_lines);
-    write_imm(0x4475634B);
+    write_imm(DUCKY_MAGIC);
     write_imm(num_lines);
     off_t linetab_off = bytes_written;
     for(unsigned i = 1; i <= num_lines; ++i)
@@ -1209,6 +1209,9 @@ void ducky_compile(int fd, bool verbose, int out)
     }
 
     /* initialize some other constants */
+
+    setVariable(".", 0);
+    setConst(".", true);
 
     setVariable("true", 1);
     setConst("true", true);
@@ -1235,6 +1238,7 @@ void ducky_compile(int fd, bool verbose, int out)
         char *tok = NULL, *save = NULL;
 
         ++current_line;
+        write_instr(LINEMARK);
 
         char *buf = instr_buf;
 

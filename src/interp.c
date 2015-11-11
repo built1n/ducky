@@ -38,12 +38,7 @@
 #define CALL_STACK_SZ 64
 #define VARMAP_SIZE 256
 
-#define VARFORMAT "%lld"
 #define VARNAME_MAX 24
-
-#define ARRAYLEN(x) (sizeof(x)/sizeof(x[0]))
-
-#define MIN(x,y) ((x<y)?(x):(y))
 
 /*** Globals ***/
 
