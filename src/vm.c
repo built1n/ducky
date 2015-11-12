@@ -110,8 +110,10 @@ static void init_globals(void)
 {
     current_line = 0;
     stack_pointer = 0;
+    callstack_pointer = 0;
     want_quit = false;
     repeats_left = 0;
+    repeat_line = 0;
 }
 
 static inline void push(imm_t n)
@@ -153,7 +155,10 @@ static inline void mkconst(varid_t varid)
 static inline void jump(imm_t line)
 {
     if(1 <= line && line <= num_lines)
+    {
         lseek(file_des, line_offset[line], SEEK_SET);
+        current_line = line;
+    }
     else
         error("jump target out of bounds");
 }
@@ -206,9 +211,20 @@ void writestr_handler(void)
 
 void repeat_handler(void)
 {
-    repeat_line = pop();
-    repeats_left = pop() - 1;
-    jump(repeat_line);
+    if(repeats_left > 0)
+    {
+        --repeats_left;
+        if(repeats_left > 0)
+        {
+            jump(repeat_line);
+        }
+    }
+    else
+    {
+        repeat_line = pop();
+        repeats_left = pop() - 1;
+        jump(repeat_line);
+    }
 }
 
 void jump_handler(void)
@@ -440,19 +456,6 @@ void inc_line_pointer(void)
     ++current_line;
 
     vars[0].val = current_line;
-    if(repeats_left > 0)
-    {
-        --repeats_left;
-        if(repeats_left)
-            jump(repeat_line);
-        else
-        {
-            if(current_line + 2 > num_lines)
-                want_quit = true;
-            else
-                jump(current_line + 2);
-        }
-    }
 }
 
 static void (*instr_tab[0x100])(void) = {
