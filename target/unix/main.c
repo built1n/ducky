@@ -9,7 +9,7 @@ char *progname;
 
 void arg_error(void)
 {
-    printf("Usage: %s [-c] FILE\n", progname);
+    printf("Usage: %s [-cei] FILE\n", progname);
     exit(EXIT_FAILURE);
 }
 
@@ -34,6 +34,14 @@ int main(int argc, char *argv[])
         if(file)
         {
             int fd = open(file, O_RDONLY), out_fd;
+            unsigned char header[4];
+            read(fd, &header, sizeof(header));
+            if(*((uint32_t*)header) == DUCKY_MAGIC)
+            {
+                printf("Detected ducky bytecode signature.\n");
+                action = EXECUTE;
+            }
+            lseek(fd, 0, SEEK_SET);
             switch(action)
             {
             case INTERP:

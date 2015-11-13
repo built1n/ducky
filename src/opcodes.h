@@ -38,4 +38,10 @@
 #define RSH        0x25
 #define SQRT       0x26
 #define DECL_CONST 0x27
+#define SENDKEY    0x28
+#define DFL_DELAY  0x29
+#define STR_DELAY  0x2A
+#define TYPE_DEC   0x2B
+#define TYPE_STR   0x2C
+/* new opcodes here, be sure to update vm.c */
 #define LINEMARK   0xFF

@@ -213,6 +213,8 @@ void repeat_handler(void)
 {
     if(repeats_left > 0)
     {
+        if(repeat_line + 1 != current_line)
+            error("nested REPEAT");
         --repeats_left;
         if(repeats_left > 0)
         {

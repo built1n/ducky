@@ -4,6 +4,9 @@
 #define DUCKY_MAGIC 0x4475634B /* DucK */
 #define VARFORMAT "%lld"
 
+/* define for rockbox cross-compile */
+#define DUCKY_ROCKBOX
+
 #define ARRAYLEN(x) (sizeof(x)/sizeof(x[0]))
 
 #define MIN(x,y) ((x<y)?(x):(y))

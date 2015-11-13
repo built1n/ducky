@@ -848,6 +848,8 @@ static int repeat_handler(char **save, int *repeats_left)
     (void) save;
     if(*repeats_left > 0)
     {
+        if(repeat_line + 1 != current_line)
+            error("nested REPEAT");
         --(*repeats_left);
         if(*repeats_left)
             jump_line(file_des, repeat_line);
@@ -1312,7 +1314,9 @@ void ducky_main(int fd, bool verbose)
                 default:
                     error("FIXME: invalid return value");
                 }
-            else if(tok[0] != '#')
+            else if(tok[0] == '#')
+                goto next_line;
+            else
             {
                 error("unknown token `%s` on line %d %d", tok, current_line);
                 goto done;
