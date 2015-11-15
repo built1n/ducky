@@ -741,6 +741,10 @@ void ducky_vm(int fd)
         instr_t instr = read_instr();
         if(want_quit)
             break;
-        instr_tab[instr]();
+        void (*handler)(void) = instr_tab[instr];
+        if(handler)
+            handler();
+        else
+            error("invalid instruction");
     }
 }

@@ -2,7 +2,9 @@
 #include <stdint.h>
 
 #define DUCKY_MAGIC 0x4475634B /* DucK */
-#define VARFORMAT "%lld"
+#define VARFORMAT "%d"
+#define VARNAME_MAX 24
+#define MAXOPSTACK 64
 
 /* define for rockbox cross-compile */
 #define DUCKY_ROCKBOX
@@ -15,7 +17,7 @@ void ducky_main(int fd, bool verbose);
 void ducky_compile(int fd, bool verbose, int out_fd);
 void ducky_vm(int fd);
 
-typedef int64_t imm_t;
+typedef int32_t imm_t;
 typedef uint8_t instr_t;
 typedef uint16_t varid_t;
 typedef imm_t vartype;

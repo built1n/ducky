@@ -1,6 +1,8 @@
 Ducky
 =====
 
+IRC: ##ducky-lang at `irc.freenode.net`
+
 ## Introduction
 
 Ducky is a BASIC-like programming language originally insipred by Duckyscript, the USB Rubber Ducky's scripting language.

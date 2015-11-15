@@ -43,5 +43,6 @@
 #define STR_DELAY  0x2A
 #define TYPE_DEC   0x2B
 #define TYPE_STR   0x2C
+#define ADD_CHAR   0x2D
 /* new opcodes here, be sure to update vm.c */
 #define LINEMARK   0xFF
