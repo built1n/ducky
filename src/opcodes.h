@@ -44,5 +44,6 @@
 #define TYPE_DEC   0x2B
 #define TYPE_STR   0x2C
 #define ADD_CHAR   0x2D
+#define NEWLINE    0x2E
 /* new opcodes here, be sure to update vm.c */
 #define LINEMARK   0xFF

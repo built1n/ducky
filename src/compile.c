@@ -921,7 +921,7 @@ static int quit_handler(char **save)
 static int newline_handler(char **save)
 {
     (void) save;
-    vid_write("\n");
+    write_instr(NEWLINE);
     return OK;
 }
 

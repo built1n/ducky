@@ -16,6 +16,7 @@
 void ducky_main(int fd, bool verbose);
 void ducky_compile(int fd, bool verbose, int out_fd);
 void ducky_vm(int fd);
+void ducky_to_c(int fd, int out_fd);
 
 typedef int32_t imm_t;
 typedef uint8_t instr_t;

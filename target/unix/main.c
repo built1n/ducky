@@ -4,12 +4,13 @@
 #define COMPILE 1
 #define INTERP 2
 #define EXECUTE 3
+#define TRANSCOMPILE 4
 
 char *progname;
 
 void arg_error(void)
 {
-    printf("Usage: %s [-cei] FILE\n", progname);
+    printf("Usage: %s [-ceit] FILE\n", progname);
     exit(EXIT_FAILURE);
 }
 
@@ -28,6 +29,8 @@ int main(int argc, char *argv[])
                 action = INTERP;
             else if(!strcmp(argv[i], "-e"))
                 action = EXECUTE;
+            else if(!strcmp(argv[i], "-t"))
+                action = TRANSCOMPILE;
             else
                 file = argv[i];
         }
@@ -39,7 +42,8 @@ int main(int argc, char *argv[])
             if(*((uint32_t*)header) == DUCKY_MAGIC)
             {
                 printf("Detected ducky bytecode signature.\n");
-                action = EXECUTE;
+                if(action != TRANSCOMPILE)
+                    action = EXECUTE;
             }
             lseek(fd, 0, SEEK_SET);
             switch(action)
@@ -53,6 +57,10 @@ int main(int argc, char *argv[])
                 break;
             case EXECUTE:
                 ducky_vm(fd);
+                break;
+            case TRANSCOMPILE:
+                out_fd = open("a.c", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                ducky_to_c(fd, out_fd);
                 break;
             default:
                 break;
