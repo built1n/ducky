@@ -63,6 +63,8 @@ void write_src(const char *fmt, ...)
     static int indent_depth = 0;
     va_list ap;
     va_start(ap, fmt);
+    if(fmt[0] == '}')
+        --indent_depth;
     char space = ' ';
     for(int i = 0; i < INDENT_SPACES * indent_depth; ++i)
         write(out_fd, &space, 1);
@@ -71,8 +73,14 @@ void write_src(const char *fmt, ...)
 
     if(fmt[0] == '{')
         ++indent_depth;
-    else if(fmt[0] == '}')
-        --indent_depth;
+}
+
+void write_src_noindent(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vdprintf(out_fd, fmt, ap);
+    va_end(ap);
 }
 
 static void vid_write(const char *str)
@@ -153,40 +161,44 @@ static void incvar_handler(void)
 static void decvar_handler(void)
 {
     write_src("varid_t varid = read_varid();\n");
-    write_src("    if(varid < MAX_VARS)\n");
-    write_src("        --vars[varid].val;\n");
+    write_src("if(varid < MAX_VARS)\n");
+    write_src("--vars[varid].val;\n");
 }
 
 static void writestr_handler(void)
 {
+    write_src("vid_write(\"");
     while(1)
     {
         char c = read_byte();
         if(c)
-            vid_writef("%c", c);
+            write_src_noindent("%c", c & 0xFF);
         else
             break;
+        if(c == '\\')
+            write_src_noindent("%c", '\\');
     }
+    write_src_noindent("\");\n");
 }
 
 static void repeat_handler(void)
 {
-    write_src("    if(repeats_left > 0)\n");
-    write_src("    {\n");
-    write_src("        if(repeat_line + 1 != vars[0].val)\n");
-    write_src("            error(\"nested REPEAT\");\n");
-    write_src("        --repeats_left;\n");
-    write_src("        if(repeats_left > 0)\n");
-    write_src("        {\n");
-    write_src("            jump(repeat_line);\n");
-    write_src("        }\n");
-    write_src("    }\n");
-    write_src("    else\n");
-    write_src("    {\n");
-    write_src("        repeat_line = pop();\n");
-    write_src("        repeats_left = pop() - 1;\n");
-    write_src("        jump(repeat_line);\n");
-    write_src("    }\n");
+    write_src("if(repeats_left > 0)\n");
+    write_src("{\n");
+    write_src("if(repeat_line + 1 != vars[0].val)\n");
+    write_src("error(\"nested REPEAT\");\n");
+    write_src("--repeats_left;\n");
+    write_src("if(repeats_left > 0)\n");
+    write_src("{\n");
+    write_src("jump(repeat_line);\n");
+    write_src("}\n");
+    write_src("}\n");
+    write_src("else\n");
+    write_src("{\n");
+    write_src("repeat_line = pop();\n");
+    write_src("repeats_left = pop() - 1;\n");
+    write_src("jump(repeat_line);\n");
+    write_src("}\n");
 }
 
 static void jump_handler(void)
@@ -208,47 +220,47 @@ static void subcall_handler(void)
 static void subret_handler(void)
 {
     write_src("if(callstack_pointer > 0)\n");
-    write_src("    {\n");
-    write_src("        jump(callstack[--callstack_pointer]);\n");
-    write_src("    }\n");
-    write_src("    else\n");
-    write_src("        error(\"call stack underflow\");\n");
+    write_src("{\n");
+    write_src("jump(callstack[--callstack_pointer]);\n");
+    write_src("}\n");
+    write_src("else\n");
+    write_src("error(\"call stack underflow\");\n");
 }
 
 static void if_handler(void)
 {
     write_src("{\n");
     write_src("imm_t line = pop();\n");
-    write_src("    if(!pop())\n");
-    write_src("        jump(line);\n");
+    write_src("if(!pop())\n");
+    write_src("jump(line);\n");
     write_src("}\n");
 }
 
 static void delay_handler(void)
 {
     write_src("{\n");
-    write_src("    imm_t ms = pop();\n");
+    write_src("imm_t ms = pop();\n");
 
-    write_src("    struct timespec t;\n");
-    write_src("    t.tv_sec = ms / 1000;\n");
-    write_src("    t.tv_nsec = (ms % 1000) * 1000000;\n");
+    write_src("struct timespec t;\n");
+    write_src("t.tv_sec = ms / 1000;\n");
+    write_src("t.tv_nsec = (ms % 1000) * 1000000;\n");
     write_src("nanosleep(&t, NULL);\n");
     write_src("}\n");
 }
 
 static void logvar_handler(void)
 {
-    write_src("    vid_writef(\"%%d\", pop());\n");
+    write_src("vid_writef(\"%%d\", pop());\n");
 }
 
 static void quit_handler(void)
 {
-    write_src("    exit(EXIT_SUCCESS);\n");
+    write_src("exit(EXIT_SUCCESS);\n");
 }
 
 static void logascii_handler(void)
 {
-    write_src("    vid_writef(\"%%c\", pop());\n");
+    write_src("vid_writef(\"%%c\", pop());\n");
 }
 
 static void neg_handler(void)
@@ -381,58 +393,58 @@ static void logand_handler(void)
 static void logor_handler(void)
 {
     write_src("{\n");
-    write_src("    imm_t b = pop();\n");
-    write_src("    imm_t a = pop();\n");
-    write_src("    push(a||b);\n");
+    write_src("imm_t b = pop();\n");
+    write_src("imm_t a = pop();\n");
+    write_src("push(a||b);\n");
     write_src("}\n");
 }
 
 static void bitand_handler(void)
 {
     write_src("{\n");
-    write_src("    imm_t b = pop();\n");
-    write_src("    imm_t a = pop();\n");
-    write_src("    push(a&b);\n");
+    write_src("imm_t b = pop();\n");
+    write_src("imm_t a = pop();\n");
+    write_src("push(a&b);\n");
     write_src("}\n");
 }
 
 static void bitor_handler(void)
 {
     write_src("{\n");
-    write_src("    imm_t b = pop();\n");
-    write_src("    imm_t a = pop();\n");
-    write_src("    push(a|b);\n");
+    write_src("imm_t b = pop();\n");
+    write_src("imm_t a = pop();\n");
+    write_src("push(a|b);\n");
     write_src("}\n");
 }
 
 static void bitxor_handler(void)
 {
     write_src("{\n");
-    write_src("    imm_t b = pop();\n");
-    write_src("    imm_t a = pop();\n");
-    write_src("    push(a^b);\n");
+    write_src("imm_t b = pop();\n");
+    write_src("imm_t a = pop();\n");
+    write_src("push(a^b);\n");
     write_src("}\n");
 }
 
 static void bitcomp_handler(void)
 {
-    write_src("    push(~pop());\n");
+    write_src("push(~pop());\n");
 }
 
 static void lsh_handler(void)
 {
     write_src("{\n");
-    write_src("    imm_t b = pop();\n");
-    write_src("    imm_t a = pop();\n");
-    write_src("    push(a<<b);\n");
+    write_src("imm_t b = pop();\n");
+    write_src("imm_t a = pop();\n");
+    write_src("push(a<<b);\n");
     write_src("}\n");
 }
 
 static void rsh_handler(void)
 {
     write_src("{\n");
-    write_src("    imm_t b = pop();\n");
-    write_src("    imm_t a = pop();\n");
+    write_src("imm_t b = pop();\n");
+    write_src("imm_t a = pop();\n");
     write_src("push(a>>b);\n");
     write_src("}\n");
 }
@@ -760,30 +772,30 @@ void ducky_to_c(int fd, int out)
 
     write_src("static void vid_write(const char *str)\n");
     write_src("{\n");
-    write_src("    printf(\"%%s\", str);\n");
+    write_src("printf(\"%%s\", str);\n");
     write_src("}\n");
 
     write_src("static void __attribute__((format(printf,1,2))) vid_writef(const char *fmt, ...)\n");
     write_src("{\n");
-    write_src("    char fmtbuf[256];\n");
-    write_src("    va_list ap;\n");
-    write_src("    va_start(ap, fmt);\n");
-    write_src("    vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);\n");
-    write_src("    vid_write(fmtbuf);\n");
-    write_src("    va_end(ap);\n");
+    write_src("char fmtbuf[256];\n");
+    write_src("va_list ap;\n");
+    write_src("va_start(ap, fmt);\n");
+    write_src("vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);\n");
+    write_src("vid_write(fmtbuf);\n");
+    write_src("va_end(ap);\n");
     write_src("}\n");
 
     write_src("static void __attribute__((noreturn,format(printf,1,2))) error(const char *fmt, ...)\n");
     write_src("{\n");
-    write_src("    char fmtbuf[256];\n");
-    write_src("    va_list ap;\n");
-    write_src("    va_start(ap, fmt);\n");
-    write_src("    vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);\n");
-    write_src("    if(vars[0].val)\n");
-    write_src("        vid_writef(\"Line %%d: \", vars[0].val);\n");
-    write_src("    vid_writef(\"ERROR: %%s\\n\",  fmtbuf);\n");
-    write_src("    va_end(ap);\n");
-    write_src("    exit(EXIT_FAILURE);\n");
+    write_src("char fmtbuf[256];\n");
+    write_src("va_list ap;\n");
+    write_src("va_start(ap, fmt);\n");
+    write_src("vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);\n");
+    write_src("if(vars[0].val)\n");
+    write_src("vid_writef(\"Line %%d: \", vars[0].val);\n");
+    write_src("vid_writef(\"ERROR: %%s\\n\",  fmtbuf);\n");
+    write_src("va_end(ap);\n");
+    write_src("exit(EXIT_FAILURE);\n");
     write_src("}\n");
 
     write_src("static inline void jump(imm_t line)\n");
@@ -798,44 +810,44 @@ void ducky_to_c(int fd, int out)
 
     write_src("static inline void push(imm_t n)\n");
     write_src("{\n");
-    write_src("    if(stack_pointer < STACK_SZ)\n");
-    write_src("        stack[stack_pointer++] = n;\n");
-    write_src("    else\n");
-    write_src("        error(\"stack overflow\");\n");
+    write_src("if(stack_pointer < STACK_SZ)\n");
+    write_src("stack[stack_pointer++] = n;\n");
+    write_src("else\n");
+    write_src("error(\"stack overflow\");\n");
     write_src("}\n");
 
     write_src("static inline imm_t pop(void)\n");
     write_src("{\n");
-    write_src("    if(stack_pointer > 0)\n");
-    write_src("        return stack[--stack_pointer];\n");
-    write_src("    else\n");
-    write_src("        error(\"stack underflow\");\n");
+    write_src("if(stack_pointer > 0)\n");
+    write_src("return stack[--stack_pointer];\n");
+    write_src("else\n");
+    write_src("error(\"stack underflow\");\n");
     write_src("}\n");
 
 
     write_src("static inline vartype getvar(varid_t varid)\n");
     write_src("{\n");
-    write_src("    if(varid < %d)\n", MAX_VARS);
-    write_src("        return vars[varid].val;\n");
+    write_src("if(varid < %d)\n", MAX_VARS);
+    write_src("return vars[varid].val;\n");
     write_src("}\n");
 
     write_src("static inline void setvar(varid_t varid, vartype val)\n");
     write_src("{\n");
-    write_src("    if(varid < %d && !vars[varid].constant)\n", MAX_VARS);
-    write_src("        vars[varid].val = val;\n");
-    write_src("    else\n");
-    write_src("        error(\"cannot modify variable\");\n");
+    write_src("if(varid < %d && !vars[varid].constant)\n", MAX_VARS);
+    write_src("vars[varid].val = val;\n");
+    write_src("else\n");
+    write_src("error(\"cannot modify variable\");\n");
     write_src("}\n");
 
     write_src("static inline void mkconst(varid_t varid)\n");
     write_src("{\n");
-    write_src("    if(varid < %d)\n", MAX_VARS);
-    write_src("        vars[varid].constant = true;\n");
+    write_src("if(varid < %d)\n", MAX_VARS);
+    write_src("vars[varid].constant = true;\n");
     write_src("}\n");
 
     write_src("static vartype eval_exp(vartype a1, vartype a2)\n");
     write_src("{\n");
-    write_src("    return a2<0 ? 0 : (a2==0?1:a1*eval_exp(a1, a2-1));\n");
+    write_src("return a2<0 ? 0 : (a2==0?1:a1*eval_exp(a1, a2-1));\n");
     write_src("}\n");
 
     write_src("int main()\n");

@@ -5,12 +5,13 @@
 #define INTERP 2
 #define EXECUTE 3
 #define TRANSCOMPILE 4
+#define EVERYTHING 5
 
 char *progname;
 
 void arg_error(void)
 {
-    printf("Usage: %s [-ceit] FILE\n", progname);
+    printf("Usage: %s [-aceit] FILE\n", progname);
     exit(EXIT_FAILURE);
 }
 
