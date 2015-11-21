@@ -10,7 +10,7 @@ LBL test_number
  LBL test_loop
   IF !(n % iter); GOTO composite
   INC iter
-  IF iter < stop; GOTO test_loop
+  IF iter <= stop; GOTO test_loop
  INC primes
  LBL composite
  INC n

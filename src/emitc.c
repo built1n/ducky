@@ -873,13 +873,17 @@ void ducky_to_c(int fd, int out)
 
     write_src("int main()\n");
     write_src("{\n");
-    write_src("/* this uses labels as values */\n");
-    write_src("void *jump_table[%d];\n\n", num_lines + 1);
-    write_src("/* initialize the jump table */\n");
+    write_src("/* this uses labels as values, a GCC extension */\n");
+
+
+    write_src("const void *jump_table[%d] = ", num_lines + 1);
+    write_src("{\n");
+    write_src("NULL,\n");
     for(int i = 1; i <= num_lines; ++i)
     {
-        write_src("jump_table[%d] = &&label_%d;\n", i, i);
+        write_src("&&label_%d,\n", i);
     }
+    write_src("};\n");
     write_src_noindent("\n");
 
     /* and... compile! */
