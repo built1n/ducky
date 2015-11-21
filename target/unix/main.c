@@ -50,18 +50,34 @@ int main(int argc, char *argv[])
             switch(action)
             {
             case INTERP:
-                ducky_main(fd, false);
+                if(ducky_interp(fd, false))
+                {
+                    printf("Interpreter error.\n");
+                    return 1;
+                }
                 break;
             case COMPILE:
                 out_fd = open("a.out", O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                ducky_compile(fd, false, out_fd);
+                if(ducky_compile(fd, false, out_fd))
+                {
+                    printf("Compiler error.\n");
+                    return 1;
+                }
                 break;
             case EXECUTE:
-                ducky_vm(fd);
+                if(ducky_vm(fd))
+                {
+                    printf("Bytecode interpreter error.\n");
+                    return 1;
+                }
                 break;
             case TRANSCOMPILE:
                 out_fd = open("a.c", O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                ducky_to_c(fd, out_fd);
+                if(ducky_to_c(fd, out_fd))
+                {
+                    printf("Transcompiler error.\n");
+                    return 1;
+                }
                 break;
             default:
                 break;

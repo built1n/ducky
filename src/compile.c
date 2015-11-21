@@ -35,6 +35,8 @@ static unsigned lines_executed = 0, current_line = 0, num_lines;
 
 static int file_des = -1, out_fd = -1;
 
+static jmp_buf exit_point;
+
 struct var_t {
     char name[VARNAME_MAX];
     bool constant;
@@ -169,10 +171,10 @@ static void __attribute__((noreturn,format(printf,1,2))) error(const char *fmt, 
     vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);
     if(current_line)
         vid_logf("Line %d: ", current_line);
-    vid_logf("ERROR: %s\n",  fmtbuf);
+    vid_logf("ERROR: %s",  fmtbuf);
     va_end(ap);
 
-    exit(EXIT_FAILURE);
+    longjmp(exit_point, 1);
 }
 
 static void __attribute__((format(printf,1,2))) warning(const char *fmt, ...)
@@ -1616,128 +1618,133 @@ static void init_globals(void)
     bytes_written = 0;
 }
 
-void ducky_compile(int fd, bool verbose, int out)
+int ducky_compile(int fd, bool verbose, int out)
 {
-    init_globals();
-
-    if(verbose)
+    if(!setjmp(exit_point))
     {
-        vid_logf("COMPILER INIT");
-    }
+        init_globals();
 
-    file_des = fd;
-    out_fd = out;
-
-    atexit(exit_handler);
-
-    if(file_des < 0)
-        error("invalid file");
-
-    init_optable();
-    init_tokmap();
-
-    line_offset = index_lines(file_des, &num_lines);
-    write_imm(DUCKY_MAGIC);
-    write_imm(num_lines);
-    off_t linetab_off = bytes_written;
-    for(unsigned i = 1; i <= num_lines; ++i)
-    {
-        write_imm(0);
-    }
-    if(verbose)
-    {
-        vid_logf("Indexing complete (%u lines).", num_lines);
-        vid_logf("Compiling...");
-    }
-
-    /* initialize some other constants */
-
-    makeConstantVariable(".", 0);
-
-    makeConstantVariable("true", 1);
-    makeConstantVariable("false", 0);
-
-    /* initialize labels (using output from index_lines) */
-    index_labels(file_des);
-
-    int repeats_left = 0;
-    off_t code_start = bytes_written;
-
-    while(1)
-    {
-        char instr_buf[MAX_LINE_LEN];
-        memset(instr_buf, 0, sizeof(instr_buf));
-        if(read_line(file_des, instr_buf, sizeof(instr_buf)) <= 0)
+        if(verbose)
         {
-            if(verbose)
-                vid_logf("end of file");
-            goto done;
+            vid_logf("COMPILER INIT");
         }
-        char *tok = NULL, *save = NULL;
 
-        ++current_line;
-        write_instr(LINEMARK);
+        file_des = fd;
+        out_fd = out;
 
-        char *buf = instr_buf;
+        atexit(exit_handler);
 
-        line_offset[current_line] = bytes_written;
+        if(file_des < 0)
+            error("invalid file");
 
-        /* compile all the commands on this line/instruction */
-        do {
-            tok = strtok_r(buf, " -\t", &save);
-            buf = NULL;
+        init_optable();
+        init_tokmap();
 
-            if(!tok)
-                break;
+        line_offset = index_lines(file_des, &num_lines);
+        write_imm(DUCKY_MAGIC);
+        write_imm(num_lines);
+        off_t linetab_off = bytes_written;
+        for(unsigned i = 1; i <= num_lines; ++i)
+        {
+            write_imm(0);
+        }
+        if(verbose)
+        {
+            vid_logf("Indexing complete (%u lines).", num_lines);
+            vid_logf("Compiling...");
+        }
 
-            int hash = tok_hash(tok) % TOKMAP_SIZE;
-            struct token_t *t = tokmap+hash;
-            if(hash >= 0 && strcmp(t->tok, tok) == 0)
-                switch(tokmap[hash].func(&save))
-                {
-                case OK:
-                    break;
-                case BREAK:
-                    goto break_out;
-                case DONE:
-                    goto done;
-                case NEXT:
-                    goto next_line;
-                default:
-                    error("FIXME: invalid return value");
-                }
-#ifdef DUCKY_ROCKBOX
-            else if(strlen(tok) == 1)
+        /* initialize some other constants */
+
+        makeConstantVariable(".", 0);
+
+        makeConstantVariable("true", 1);
+        makeConstantVariable("false", 0);
+
+        /* initialize labels (using output from index_lines) */
+        index_labels(file_des);
+
+        int repeats_left = 0;
+        off_t code_start = bytes_written;
+
+        while(1)
+        {
+            char instr_buf[MAX_LINE_LEN];
+            memset(instr_buf, 0, sizeof(instr_buf));
+            if(read_line(file_des, instr_buf, sizeof(instr_buf)) <= 0)
             {
-                write_instr(ADD_CHAR);
-                write_byte(tok[0]);
-            }
-#endif
-            else if(tok[0] == '#')
-                goto next_line;
-            else
-            {
-                error("unknown token `%s` on line %d %d", tok, current_line);
+                if(verbose)
+                    vid_logf("end of file");
                 goto done;
             }
-        } while(tok);
-    break_out:
-        ;
-    next_line:
-        ;
+            char *tok = NULL, *save = NULL;
+
+            ++current_line;
+            write_instr(LINEMARK);
+
+            char *buf = instr_buf;
+
+            line_offset[current_line] = bytes_written;
+
+            /* compile all the commands on this line/instruction */
+            do {
+                tok = strtok_r(buf, " -\t", &save);
+                buf = NULL;
+
+                if(!tok)
+                    break;
+
+                int hash = tok_hash(tok) % TOKMAP_SIZE;
+                struct token_t *t = tokmap+hash;
+                if(hash >= 0 && strcmp(t->tok, tok) == 0)
+                    switch(tokmap[hash].func(&save))
+                    {
+                    case OK:
+                        break;
+                    case BREAK:
+                        goto break_out;
+                    case DONE:
+                        goto done;
+                    case NEXT:
+                        goto next_line;
+                    default:
+                        error("FIXME: invalid return value");
+                    }
+#ifdef DUCKY_ROCKBOX
+                else if(strlen(tok) == 1)
+                {
+                    write_instr(ADD_CHAR);
+                    write_byte(tok[0]);
+                }
+#endif
+                else if(tok[0] == '#')
+                    goto next_line;
+                else
+                {
+                    error("unknown token `%s` on line %d %d", tok, current_line);
+                    goto done;
+                }
+            } while(tok);
+        break_out:
+            ;
+        next_line:
+            ;
+        }
+
+    done:
+
+        /* add a final instruction to flush the key buffer */
+        write_instr(LINEMARK);
+
+        /* go back and fill in the offset table */
+        lseek(out_fd, linetab_off, SEEK_SET);
+        for(unsigned i = 1; i <= num_lines; ++i)
+        {
+            write_imm(line_offset[i]);
+        }
+
+        return 0;
     }
-
-done:
-
-    /* add a final instruction to flush the key buffer */
-    write_instr(LINEMARK);
-
-    /* go back and fill in the offset table */
-    lseek(out_fd, linetab_off, SEEK_SET);
-    for(unsigned i = 1; i <= num_lines; ++i)
-    {
-        write_imm(line_offset[i]);
-    }
-
-    return;
+    else
+        return 1;
 }

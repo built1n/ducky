@@ -7,26 +7,27 @@
 #define CALLSTACK_SZ 64
 #define MAX_VARS 65536
 
-imm_t callstack[CALLSTACK_SZ];
-unsigned callstack_pointer;
+static imm_t callstack[CALLSTACK_SZ];
+static unsigned callstack_pointer;
 
-imm_t stack[STACK_SZ];
-unsigned stack_pointer;
+static imm_t stack[STACK_SZ];
+static unsigned stack_pointer;
+static jmp_buf exit_point;
 
 struct var_t {
     vartype val;
     bool constant;
 };
 
-struct var_t vars[MAX_VARS];
-int file_des;
-unsigned current_line, num_lines;
+static struct var_t vars[MAX_VARS];
+static int file_des;
+static unsigned current_line, num_lines;
 
-off_t *line_offset;
+static off_t *line_offset;
 
-bool want_quit;
-int repeats_left;
-imm_t repeat_line;
+static bool want_quit;
+static int repeats_left;
+static imm_t repeat_line;
 
 static void error(const char *fmt, ...) __attribute__((noreturn,format(print,1,2)));
 static void vid_write(const char *str);
@@ -92,7 +93,7 @@ static void __attribute__((noreturn,format(printf,1,2))) error(const char *fmt, 
     vid_writef("ERROR: %s\n",  fmtbuf);
     va_end(ap);
 
-    exit(EXIT_FAILURE);
+    longjmp(exit_point, 1);
 }
 
 static void __attribute__((format(printf,1,2))) warning(const char *fmt, ...)
@@ -163,41 +164,41 @@ static inline void jump(imm_t line)
         error("jump target out of bounds");
 }
 
-void pushimm_handler(void)
+static void pushimm_handler(void)
 {
     push(read_imm());
 }
 
-void pushvar_handler(void)
+static void pushvar_handler(void)
 {
     push(getvar(read_varid()));
 }
 
-void pop_handler(void)
+static void pop_handler(void)
 {
     setvar(read_varid(), pop());
 }
 
-void mkconst_handler(void)
+static void mkconst_handler(void)
 {
     mkconst(read_varid());
 }
 
-void incvar_handler(void)
+static void incvar_handler(void)
 {
     varid_t varid = read_varid();
     if(varid < ARRAYLEN(vars))
         ++vars[varid].val;
 }
 
-void decvar_handler(void)
+static void decvar_handler(void)
 {
     varid_t varid = read_varid();
     if(varid < ARRAYLEN(vars))
         --vars[varid].val;
 }
 
-void writestr_handler(void)
+static void writestr_handler(void)
 {
     while(1)
     {
@@ -209,7 +210,7 @@ void writestr_handler(void)
     }
 }
 
-void repeat_handler(void)
+static void repeat_handler(void)
 {
     if(repeats_left > 0)
     {
@@ -229,12 +230,12 @@ void repeat_handler(void)
     }
 }
 
-void jump_handler(void)
+static void jump_handler(void)
 {
     jump(pop());
 }
 
-void subcall_handler(void)
+static void subcall_handler(void)
 {
     if(callstack_pointer < CALLSTACK_SZ)
     {
@@ -245,7 +246,7 @@ void subcall_handler(void)
         error("call stack overflow");
 }
 
-void subret_handler(void)
+static void subret_handler(void)
 {
     if(callstack_pointer > 0)
     {
@@ -255,14 +256,14 @@ void subret_handler(void)
         error("call stack underflow");
 }
 
-void if_handler(void)
+static void if_handler(void)
 {
     imm_t line = pop();
     if(!pop())
         jump(line);
 }
 
-void delay_handler(void)
+static void delay_handler(void)
 {
     imm_t ms = pop();
 
@@ -272,22 +273,22 @@ void delay_handler(void)
     nanosleep(&t, NULL);
 }
 
-void logvar_handler(void)
+static void logvar_handler(void)
 {
     vid_writef(VARFORMAT, pop());
 }
 
-void quit_handler(void)
+static void quit_handler(void)
 {
     want_quit = true;
 }
 
-void logascii_handler(void)
+static void logascii_handler(void)
 {
     vid_writef("%c", pop());
 }
 
-void neg_handler(void)
+static void neg_handler(void)
 {
     stack[stack_pointer - 1] = -stack[stack_pointer - 1];
 }
@@ -297,155 +298,155 @@ static vartype eval_exp(vartype a1, vartype a2)
     return a2<0 ? 0 : (a2==0?1:a1*eval_exp(a1, a2-1));
 }
 
-void pow_handler(void)
+static void pow_handler(void)
 {
     imm_t pow = pop();
     imm_t base = pop();
     push(eval_exp(base, pow));
 }
 
-void mul_handler(void)
+static void mul_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a*b);
 }
 
-void div_handler(void)
+static void div_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a/b);
 }
 
-void mod_handler(void)
+static void mod_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a%b);
 }
 
-void add_handler(void)
+static void add_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a+b);
 }
 
-void sub_handler(void)
+static void sub_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a-b);
 }
 
-void eq_handler(void)
+static void eq_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a==b);
 }
 
-void neq_handler(void)
+static void neq_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a!=b);
 }
 
-void leq_handler(void)
+static void leq_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a<=b);
 }
 
-void geq_handler(void)
+static void geq_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a>=b);
 }
 
-void lt_handler(void)
+static void lt_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a<b);
 }
 
-void gt_handler(void)
+static void gt_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a>b);
 }
 
-void lognot_handler(void)
+static void lognot_handler(void)
 {
     push(!pop());
 }
 
-void logand_handler(void)
+static void logand_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a&&b);
 }
 
-void logor_handler(void)
+static void logor_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a||b);
 }
 
-void bitand_handler(void)
+static void bitand_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a&b);
 }
 
-void bitor_handler(void)
+static void bitor_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a|b);
 }
 
-void bitxor_handler(void)
+static void bitxor_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a^b);
 }
 
-void bitcomp_handler(void)
+static void bitcomp_handler(void)
 {
     push(~pop());
 }
 
-void lsh_handler(void)
+static void lsh_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a<<b);
 }
 
-void rsh_handler(void)
+static void rsh_handler(void)
 {
     imm_t b = pop();
     imm_t a = pop();
     push(a>>b);
 }
 
-void sqrt_handler(void)
+static void sqrt_handler(void)
 {
     push(sqrt(pop()));
 }
 
-void decl_const(void)
+static void decl_const(void)
 {
     /* no checking, only the compiler can output this instruction */
     varid_t varid = read_varid();
@@ -453,12 +454,12 @@ void decl_const(void)
     vars[varid].constant = true;
 }
 
-void newline_handler(void)
+static void newline_handler(void)
 {
     vid_writef("\n");
 }
 
-void inc_line_pointer(void)
+static void inc_line_pointer(void)
 {
     ++current_line;
 
@@ -724,32 +725,38 @@ static void (*instr_tab[0x100])(void) = {
     inc_line_pointer,  /*  0xff  */
 };
 
-void ducky_vm(int fd)
+int ducky_vm(int fd)
 {
-    file_des = fd;
-
-    init_globals();
-
-    if(read_imm() != DUCKY_MAGIC)
-        error("unknown format");
-
-    num_lines = read_imm();
-    line_offset = malloc(num_lines + 1);
-    for(unsigned int i = 1; i <= num_lines; ++i)
+    if(!setjmp(exit_point))
     {
-        line_offset[i] = read_imm();
-    }
+        file_des = fd;
 
-    /* and... execute! */
-    while(!want_quit)
-    {
-        instr_t instr = read_instr();
-        if(want_quit)
-            break;
-        void (*handler)(void) = instr_tab[instr];
-        if(handler)
-            handler();
-        else
-            error("invalid instruction");
+        init_globals();
+
+        if(read_imm() != DUCKY_MAGIC)
+            error("unknown format");
+
+        num_lines = read_imm();
+        line_offset = malloc(num_lines + 1);
+        for(unsigned int i = 1; i <= num_lines; ++i)
+        {
+            line_offset[i] = read_imm();
+        }
+
+        /* and... execute! */
+        while(!want_quit)
+        {
+            instr_t instr = read_instr();
+            if(want_quit)
+                break;
+            void (*handler)(void) = instr_tab[instr];
+            if(handler)
+                handler();
+            else
+                error("invalid instruction");
+        }
+        return 0;
     }
+    else
+        return 1;
 }
