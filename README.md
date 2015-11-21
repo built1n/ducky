@@ -1,7 +1,7 @@
 Ducky
 =====
 
-IRC: ##ducky-lang at `irc.freenode.net`
+IRC: #ducky-lang at `irc.freenode.net`
 
 ## Introduction
 
