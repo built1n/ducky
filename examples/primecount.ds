@@ -1,0 +1,22 @@
+#!/bin/ducky
+LOG Counting...
+NEWLINE
+LET primes=0
+LET MAX=100000
+LET n = 2
+LBL test_number
+ LET iter = 2
+ LET stop = sqrt n
+ LBL test_loop
+  IF !(n % iter); GOTO composite
+  INC iter
+  IF iter < stop; GOTO test_loop
+ INC primes
+ LBL composite
+ INC n
+ IF n < MAX; GOTO test_number
+LOG Number of primes below 
+LOGVAR MAX
+LOG : 
+LOGVAR primes
+NEWLINE
