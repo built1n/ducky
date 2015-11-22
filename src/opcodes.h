@@ -45,5 +45,6 @@
 #define TYPE_STR   0x2C
 #define ADD_CHAR   0x2D
 #define NEWLINE    0x2E
-/* new opcodes here, be sure to update vm.c */
+#define READ_VAR   0x2F
+/* new opcodes here, be sure to update compile.c, vm.c, and emitc.c */
 #define LINEMARK   0xFF

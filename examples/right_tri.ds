@@ -1,0 +1,6 @@
+#!/bin/ducky
+PROMPT a
+PROMPT b
+LOG Length of hypotenuse: 
+LOGVAR sqrt(a**2 + b**2)
+NEWLINE

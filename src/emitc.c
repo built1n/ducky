@@ -502,6 +502,15 @@ static void newline_handler(void)
     write_src("vid_writef(\"\\n\");\n");
 }
 
+static void input_handler(void)
+{
+    write_src("{\n");
+    write_src("vartype val;\n");
+    write_src("scanf(\"%s\", &val);\n", VARFORMAT);
+    write_src("setvar(%d, val);\n", read_varid());
+    write_src("}\n");
+}
+
 static void inc_line_pointer(void)
 {
     ++current_line;
@@ -558,7 +567,7 @@ static void (*instr_tab[0x100])(void) = {
     NULL,              /*  0x2c  */
     NULL,              /*  0x2d  */
     newline_handler,   /*  0x2e  */
-    NULL,              /*  0x2f  */
+    input_handler,     /*  0x2f  */
     NULL,              /*  0x30  */
     NULL,              /*  0x31  */
     NULL,              /*  0x32  */

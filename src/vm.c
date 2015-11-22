@@ -466,6 +466,13 @@ static void inc_line_pointer(void)
     vars[0].val = current_line;
 }
 
+static void input_handler(void)
+{
+    vartype val;
+    scanf(VARFORMAT, &val);
+    setvar(read_varid(), val);
+}
+
 static void (*instr_tab[0x100])(void) = {
     pushimm_handler,   /*  0x0   */
     pushvar_handler,   /*  0x1   */
@@ -514,7 +521,7 @@ static void (*instr_tab[0x100])(void) = {
     NULL,              /*  0x2c  */
     NULL,              /*  0x2d  */
     newline_handler,   /*  0x2e  */
-    NULL,              /*  0x2f  */
+    input_handler,     /*  0x2f  */
     NULL,              /*  0x30  */
     NULL,              /*  0x31  */
     NULL,              /*  0x32  */
