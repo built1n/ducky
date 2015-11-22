@@ -67,14 +67,20 @@ void write_src_noindent(const char *fmt, ...)
     va_end(ap);
 }
 
+static bool possibly_oneline = false;
+static int indent_depth = 0;
+
 void write_src(const char *fmt, ...)
 {
-    static bool possibly_oneline = false;
-    static int indent_depth = 0;
-
     if(fmt[0] == '}')
     {
         --indent_depth;
+    }
+
+    if(fmt[0] == '{' && possibly_oneline)
+    {
+        --indent_depth;
+        possibly_oneline = false;
     }
 
     char space = ' ';
@@ -863,8 +869,8 @@ void write_stub_code(int num_lines)
     write_src("{\n");
     write_src("/* this uses labels as values, a GCC extension */\n");
 
-    write_src("const void *jump_table[%d] = ", num_lines + 1);
-    write_src("{\n");
+    write_src("const void *jump_table[%d] = {\n", num_lines + 1);
+    ++indent_depth;
     write_src("NULL,\n");
     for(int i = 1; i <= num_lines; ++i)
     {
@@ -906,7 +912,7 @@ int ducky_to_c(int fd, int out)
             else
                 error("invalid instruction %d", instr);
         }
-        write_src("}\n");
+        write_src("}");
         return 0;
     }
     else
