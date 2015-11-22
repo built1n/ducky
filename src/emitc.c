@@ -165,19 +165,19 @@ static void init_globals(void)
     want_quit = false;
 }
 
-static void pushimm_handler(void)
+static void PUSHimm_handler(void)
 {
-    write_src("push("VARFORMAT");\n", read_imm());
+    write_src("PUSH("VARFORMAT");\n", read_imm());
 }
 
-static void pushvar_handler(void)
+static void PUSHvar_handler(void)
 {
-    write_src("push(getvar("VARFORMAT"));\n", read_varid());
+    write_src("PUSH(getvar("VARFORMAT"));\n", read_varid());
 }
 
-static void pop_handler(void)
+static void POP_handler(void)
 {
-    write_src("setvar("VARFORMAT", pop());\n", read_varid());
+    write_src("setvar("VARFORMAT", POP());\n", read_varid());
 }
 
 static void mkconst_handler(void)
@@ -229,15 +229,15 @@ static void repeat_handler(void)
     write_src("}\n");
     write_src("else\n");
     write_src("{\n");
-    write_src("repeat_line = pop();\n");
-    write_src("repeats_left = pop() - 1;\n");
+    write_src("repeat_line = POP();\n");
+    write_src("repeats_left = POP() - 1;\n");
     write_src("JUMP(repeat_line);\n");
     write_src("}\n");
 }
 
 static void JUMP_handler(void)
 {
-    write_src("JUMP(pop());\n");
+    write_src("JUMP(POP());\n");
 }
 
 static void subcall_handler(void)
@@ -245,7 +245,7 @@ static void subcall_handler(void)
     write_src("if(callstack_pointer < CALLSTACK_SZ)\n");
     write_src("{\n");
     write_src("callstack[callstack_pointer++] = vars[0].val + 1;\n");
-    write_src("JUMP(pop());\n");
+    write_src("JUMP(POP());\n");
     write_src("}\n");
     write_src("else\n");
     write_src("error(\"call stack overflow\");\n");
@@ -264,8 +264,8 @@ static void subret_handler(void)
 static void if_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t line = pop();\n");
-    write_src("imm_t truth = pop();\n");
+    write_src("imm_t line = POP();\n");
+    write_src("imm_t truth = POP();\n");
     write_src("if(!truth)\n");
     write_src("JUMP(line);\n");
     write_src("}\n");
@@ -274,7 +274,7 @@ static void if_handler(void)
 static void delay_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t ms = pop();\n");
+    write_src("imm_t ms = POP();\n");
 
     write_src("struct timespec t;\n");
     write_src("t.tv_sec = ms / 1000;\n");
@@ -285,7 +285,7 @@ static void delay_handler(void)
 
 static void logvar_handler(void)
 {
-    write_src("vid_writef(\"%%d\", pop());\n");
+    write_src("vid_writef(\"%%d\", POP());\n");
 }
 
 static void quit_handler(void)
@@ -295,7 +295,7 @@ static void quit_handler(void)
 
 static void logascii_handler(void)
 {
-    write_src("vid_writef(\"%%c\", pop());\n");
+    write_src("vid_writef(\"%%c\", POP());\n");
 }
 
 static void neg_handler(void)
@@ -306,187 +306,187 @@ static void neg_handler(void)
 static void pow_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t pow = pop();\n");
-    write_src("imm_t base = pop();\n");
-    write_src("push(eval_exp(base, pow));\n");
+    write_src("imm_t pow = POP();\n");
+    write_src("imm_t base = POP();\n");
+    write_src("PUSH(eval_exp(base, pow));\n");
     write_src("}\n");
 }
 
 static void mul_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a*b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a*b);\n");
     write_src("}\n");
 }
 
 static void div_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a/b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a/b);\n");
     write_src("}\n");
 }
 
 static void mod_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a%b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a%b);\n");
     write_src("}\n");
 }
 
 static void add_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a+b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a+b);\n");
     write_src("}\n");
 }
 
 static void sub_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a-b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a-b);\n");
     write_src("}\n");
 }
 
 static void eq_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a==b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a==b);\n");
     write_src("}\n");
 }
 
 static void neq_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a!=b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a!=b);\n");
     write_src("}\n");
 }
 
 static void leq_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a<=b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a<=b);\n");
     write_src("}\n");
 }
 
 static void geq_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a>=b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a>=b);\n");
     write_src("}\n");
 }
 
 static void lt_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a<b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a<b);\n");
     write_src("}\n");
 }
 
 static void gt_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a>b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a>b);\n");
     write_src("}\n");
 }
 
 static void lognot_handler(void)
 {
-    write_src("push(!pop());\n");
+    write_src("PUSH(!POP());\n");
 }
 
 static void logand_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a&&b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a&&b);\n");
     write_src("}\n");
 }
 
 static void logor_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a||b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a||b);\n");
     write_src("}\n");
 }
 
 static void bitand_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a&b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a&b);\n");
     write_src("}\n");
 }
 
 static void bitor_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a|b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a|b);\n");
     write_src("}\n");
 }
 
 static void bitxor_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a^b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a^b);\n");
     write_src("}\n");
 }
 
 static void bitcomp_handler(void)
 {
-    write_src("push(~pop());\n");
+    write_src("PUSH(~POP());\n");
 }
 
 static void lsh_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a<<b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a<<b);\n");
     write_src("}\n");
 }
 
 static void rsh_handler(void)
 {
     write_src("{\n");
-    write_src("imm_t b = pop();\n");
-    write_src("imm_t a = pop();\n");
-    write_src("push(a>>b);\n");
+    write_src("imm_t b = POP();\n");
+    write_src("imm_t a = POP();\n");
+    write_src("PUSH(a>>b);\n");
     write_src("}\n");
 }
 
 static void sqrt_handler(void)
 {
-    write_src("push(sqrt(pop()));\n");
+    write_src("PUSH(sqrt(POP()));\n");
 }
 
 static void decl_const(void)
@@ -511,9 +511,9 @@ static void inc_line_pointer(void)
 }
 
 static void (*instr_tab[0x100])(void) = {
-    pushimm_handler,   /*  0x0   */
-    pushvar_handler,   /*  0x1   */
-    pop_handler,       /*  0x2   */
+    PUSHimm_handler,   /*  0x0   */
+    PUSHvar_handler,   /*  0x1   */
+    POP_handler,       /*  0x2   */
     mkconst_handler,   /*  0x3   */
     incvar_handler,    /*  0x4   */
     decvar_handler,    /*  0x5   */
@@ -787,17 +787,16 @@ void write_stub_code(int num_lines)
     write_src("typedef uint16_t varid_t;\n\n");
     write_src("imm_t stack[STACK_SZ];\n");
     write_src("imm_t callstack[CALLSTACK_SZ];\n");
-    write_src("imm_t stack_pointer, callstack_pointer;\n");
     write_src("unsigned repeats_left = 0, repeat_line = 0;\n");
     write_src("struct var_t { imm_t val; bool constant; };\n");
     write_src("struct var_t vars[MAX_VARS];\n\n");
 
-    write_src("static void vid_write(const char *str)\n");
+    write_src("static inline void vid_write(const char *str)\n");
     write_src("{\n");
     write_src("printf(\"%%s\", str);\n");
     write_src("}\n");
 
-    write_src("static void __attribute__((format(printf,1,2))) vid_writef(const char *fmt, ...)\n");
+    write_src("static inline void __attribute__((format(printf,1,2))) vid_writef(const char *fmt, ...)\n");
     write_src("{\n");
     write_src("char fmtbuf[256];\n");
     write_src("va_list ap;\n");
@@ -820,7 +819,8 @@ void write_stub_code(int num_lines)
     write_src("exit(EXIT_FAILURE);\n");
     write_src("}\n");
 
-    write_src("static void push(imm_t n)\n");
+#if 0
+    write_src("static inline void PUSH(imm_t n)\n");
     write_src("{\n");
     write_src("if(stack_pointer < STACK_SZ)\n");
     write_src("stack[stack_pointer++] = n;\n");
@@ -828,15 +828,16 @@ void write_stub_code(int num_lines)
     write_src("error(\"stack overflow\");\n");
     write_src("}\n");
 
-    write_src("static imm_t pop(void)\n");
+    write_src("static inline imm_t POP(void)\n");
     write_src("{\n");
     write_src("if(stack_pointer > 0)\n");
     write_src("return stack[--stack_pointer];\n");
     write_src("else\n");
     write_src("error(\"stack underflow\");\n");
     write_src("}\n");
+#endif
 
-    write_src("static vartype getvar(varid_t varid)\n");
+    write_src("static inline vartype getvar(varid_t varid)\n");
     write_src("{\n");
     write_src("if(varid < %d)\n", MAX_VARS);
     write_src("return vars[varid].val;\n");
@@ -844,7 +845,7 @@ void write_stub_code(int num_lines)
     write_src("error(\"cannot access variable\");\n");
     write_src("}\n");
 
-    write_src("static void setvar(varid_t varid, vartype val)\n");
+    write_src("static inline void setvar(varid_t varid, vartype val)\n");
     write_src("{\n");
     write_src("if(varid < %d && !vars[varid].constant)\n", MAX_VARS);
     write_src("vars[varid].val = val;\n");
@@ -852,7 +853,7 @@ void write_stub_code(int num_lines)
     write_src("error(\"cannot modify variable\");\n");
     write_src("}\n");
 
-    write_src("static void mkconst(varid_t varid)\n");
+    write_src("static inline void mkconst(varid_t varid)\n");
     write_src("{\n");
     write_src("if(varid < %d)\n", MAX_VARS);
     write_src("vars[varid].constant = true;\n");
@@ -864,9 +865,14 @@ void write_stub_code(int num_lines)
     write_src("}\n");
 
     write_src("#define JUMP(LINE) do{imm_t x = LINE; if(1 <= x && x <= %d) goto *jump_table[x]; else error(\"jump target out of range\");}while(0);\n\n", num_lines);
+    write_src("#define PUSH(VAL) do { imm_t x = VAL; if(stack_pointer < STACK_SZ) stack[stack_pointer++] = x; else error(\"stack overflow\");}while(0);\n\n");
+    write_src("#define POP() (stack[--stack_pointer])\n");
 
     write_src("int main()\n");
     write_src("{\n");
+    write_src("register imm_t stack_pointer = 0, callstack_pointer = 0;\n");
+    write_src("(void) stack_pointer; (void) callstack_pointer;\n");
+    write_src("(void) eval_exp;\n");
     write_src("/* this uses labels as values, a GCC extension */\n");
 
     write_src("const void *jump_table[%d] = {\n", num_lines + 1);
