@@ -218,7 +218,7 @@ static void repeat_handler(void)
     write_src("--repeats_left;\n");
     write_src("if(repeats_left > 0)\n");
     write_src("{\n");
-    write_src("{JUMP(repeat_line);\n");
+    write_src("JUMP(repeat_line);\n");
     write_src("}\n");
     write_src("}\n");
     write_src("else\n");
@@ -782,6 +782,7 @@ void write_stub_code(int num_lines)
     write_src("imm_t stack[STACK_SZ];\n");
     write_src("imm_t callstack[CALLSTACK_SZ];\n");
     write_src("imm_t stack_pointer, callstack_pointer;\n");
+    write_src("unsigned repeats_left = 0, repeat_line = 0;\n");
     write_src("struct var_t { imm_t val; bool constant; };\n");
     write_src("struct var_t vars[MAX_VARS];\n\n");
 
