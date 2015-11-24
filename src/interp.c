@@ -105,7 +105,7 @@ static struct varnode_t *lookup_var(const char *name)
     struct varnode_t *new = malloc(sizeof(struct varnode_t));
 
     memset(new, 0, sizeof(struct varnode_t));
-    strlcpy(new->name, name, sizeof(new->name));
+    strncpy(new->name, name, sizeof(new->name));
     new->val = 0;
     new->constant = false;
     new->next = NULL;

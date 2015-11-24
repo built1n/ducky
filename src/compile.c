@@ -90,7 +90,7 @@ varid_t get_varid(const char *name)
     for(int i = 0; i < last_assigned_var; ++i)
         if(strcmp(name, vars[i].name) == 0)
             return i;
-    strlcpy(vars[last_assigned_var].name, name, VARNAME_MAX);
+    strncpy(vars[last_assigned_var].name, name, VARNAME_MAX);
     ++last_assigned_var;
     return last_assigned_var - 1;
 }

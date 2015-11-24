@@ -4,7 +4,7 @@ PLATFORM = unix
 
 DUCKY_OBJ = src/interp.o src/compile.o src/vm.o src/emitc.o
 
-CFLAGS = -lbsd -lm -Og -g -I src/ -I target/$(PLATFORM)
+CFLAGS = -lm -Og -g -I src/ -I target/$(PLATFORM)
 
 all: $(OUT)/$(PLATFORM).bin
 
