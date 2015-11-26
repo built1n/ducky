@@ -50,7 +50,6 @@ int main(int argc, char *argv[])
             read(fd, &header, sizeof(header));
             if(*((uint32_t*)header) == DUCKY_MAGIC)
             {
-                printf("Detected ducky bytecode signature.\n");
                 if(action != TRANSCOMPILE)
                     action = EXECUTE;
             }

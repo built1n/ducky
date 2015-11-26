@@ -56,28 +56,28 @@ unsigned bytes_written;
 void write_instr(instr_t ins)
 {
     write(out_fd, &ins, sizeof(ins));
-    vid_logf("writing instruction 0x%x", ins);
+    //vid_logf("writing instruction 0x%x", ins);
     bytes_written += sizeof(ins);
 }
 
 void write_imm(imm_t imm)
 {
     write(out_fd, &imm, sizeof(imm));
-    vid_logf("writing immediate 0x%x", imm);
+    //vid_logf("writing immediate 0x%x", imm);
     bytes_written += sizeof(imm);
 }
 
 void write_byte(unsigned char c)
 {
     write(out_fd, &c, 1);
-    vid_logf("writing byte '%c'", c);
+    //vid_logf("writing byte '%c'", c);
     bytes_written += 1;
 }
 
 void write_varid(varid_t varid)
 {
     write(out_fd, &varid, sizeof(varid));
-    vid_logf("writing varid %d which is %s", varid, vars[varid].name);
+    //vid_logf("writing varid %d which is %s", varid, vars[varid].name);
     bytes_written += sizeof(varid);
 }
 
@@ -1599,7 +1599,7 @@ int ducky_compile(int fd, bool verbose, int out)
         if(verbose)
         {
             vid_logf("Indexing complete (%u lines).", num_lines);
-            vid_logf("Compiling...");
+            vid_logf("Byte-compiling...");
         }
 
         /* initialize some other constants */
@@ -1685,6 +1685,9 @@ int ducky_compile(int fd, bool verbose, int out)
         }
 
     done:
+
+        if(verbose)
+            vid_logf("Finishing compile...");
 
         /* add a final instruction to flush the key buffer */
         write_instr(LINEMARK);
