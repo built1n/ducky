@@ -46,5 +46,6 @@
 #define ADD_CHAR   0x2D
 #define NEWLINE    0x2E
 #define READ_VAR   0x2F
+#define MKSPECIAL  0x30
 /* new opcodes here, be sure to update compile.c, vm.c, and emitc.c */
 #define LINEMARK   0xFF

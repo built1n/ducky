@@ -23,9 +23,7 @@ static int repeats_left;
 static imm_t repeat_line;
 static jmp_buf exit_point;
 
-static void error(const char *fmt, ...) __attribute__((noreturn,format(print,1,2)));
 static void vid_write(const char *str);
-static void vid_logf(const char *fmt, ...) __attribute__((format(printf,1,2)));
 
 static instr_t read_instr(void)
 {
@@ -133,21 +131,6 @@ static void __attribute__((format(printf,1,2))) vid_writef(const char *fmt, ...)
     va_end(ap);
 }
 
-static void __attribute__((noreturn,format(printf,1,2))) error(const char *fmt, ...)
-{
-    char fmtbuf[256];
-
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);
-    if(current_line)
-        vid_writef("Line %d: ", current_line);
-    vid_writef("ERROR: %s\n",  fmtbuf);
-    va_end(ap);
-
-    longjmp(exit_point, 1);
-}
-
 static void __attribute__((format(printf,1,2))) warning(const char *fmt, ...)
 {
     char fmtbuf[256];
@@ -220,7 +203,7 @@ static void repeat_handler(void)
     write_src("if(repeats_left > 0)\n");
     write_src("{\n");
     write_src("if(repeat_line + 1 != vars[0].val)\n");
-    write_src("error(\"nested REPEAT\");\n");
+    write_src("ERROR(\"nested REPEAT\");\n");
     write_src("--repeats_left;\n");
     write_src("if(repeats_left > 0)\n");
     write_src("{\n");
@@ -248,7 +231,7 @@ static void subcall_handler(void)
     write_src("JUMP(POP());\n");
     write_src("}\n");
     write_src("else\n");
-    write_src("error(\"call stack overflow\");\n");
+    write_src("ERROR(\"call stack overflow\");\n");
 }
 
 static void subret_handler(void)
@@ -258,7 +241,7 @@ static void subret_handler(void)
     write_src("JUMP(callstack[--callstack_pointer]);\n");
     write_src("}\n");
     write_src("else\n");
-    write_src("error(\"call stack underflow\");\n");
+    write_src("ERROR(\"call stack underflow\");\n");
 }
 
 static void if_handler(void)
@@ -335,7 +318,7 @@ static void mod_handler(void)
     write_src("{\n");
     write_src("imm_t b = POP();\n");
     write_src("imm_t a = POP();\n");
-    write_src("PUSH(a%b);\n");
+    write_src("PUSH(a%%b);\n");
     write_src("}\n");
 }
 
@@ -511,6 +494,14 @@ static void input_handler(void)
     write_src("}\n");
 }
 
+static void mkspecial_handler(void)
+{
+    varid_t varid = read_varid();
+    write_src("vars[%d].constant = true;\n", varid);
+    write_src("vars[%d].type = TYPE_SPECIAL;\n", varid);
+    write_src("vars[%d].special = %d;\n", varid, read_imm());
+}
+
 static void inc_line_pointer(void)
 {
     ++current_line;
@@ -568,7 +559,7 @@ static void (*instr_tab[0x100])(void) = {
     NULL,              /*  0x2d  */
     newline_handler,   /*  0x2e  */
     input_handler,     /*  0x2f  */
-    NULL,              /*  0x30  */
+    mkspecial_handler, /*  0x30  */
     NULL,              /*  0x31  */
     NULL,              /*  0x32  */
     NULL,              /*  0x33  */
@@ -787,7 +778,8 @@ void write_stub_code(int num_lines)
     write_src("#include <stdio.h>\n");
     write_src("#include <stdint.h>\n");
     write_src("#include <stdlib.h>\n\n");
-    write_src("#include <math.h>\n\n");
+    write_src("#include <math.h>\n");
+    write_src("#include <time.h>\n\n");
     write_src("#define CALLSTACK_SZ %d\n", CALLSTACK_SZ);
     write_src("#define MAX_VARS %d\n", MAX_VARS);
     write_src("#define STACK_SZ %d\n\n", STACK_SZ);
@@ -797,7 +789,7 @@ void write_stub_code(int num_lines)
     write_src("imm_t stack[STACK_SZ];\n");
     write_src("imm_t callstack[CALLSTACK_SZ];\n");
     write_src("unsigned repeats_left = 0, repeat_line = 0;\n");
-    write_src("struct var_t { imm_t val; bool constant; };\n");
+    write_src("struct var_t { enum {TYPE_PLAIN, TYPE_SPECIAL} type; bool constant; union { vartype val; int special;}; };\n");
     write_src("struct var_t vars[MAX_VARS];\n\n");
 
     write_src("static inline void vid_write(const char *str)\n");
@@ -815,7 +807,7 @@ void write_stub_code(int num_lines)
     write_src("va_end(ap);\n");
     write_src("}\n");
 
-    write_src("static void __attribute__((noreturn,format(printf,1,2))) error(const char *fmt, ...)\n");
+    write_src("static void __attribute__((noreturn,format(printf,1,2))) ERROR(const char *fmt, ...)\n");
     write_src("{\n");
     write_src("char fmtbuf[256];\n");
     write_src("va_list ap;\n");
@@ -828,13 +820,45 @@ void write_stub_code(int num_lines)
     write_src("exit(EXIT_FAILURE);\n");
     write_src("}\n");
 
+    write_src("vartype spec_zero(void)\n");
+    write_src("{\n");
+    write_src("return 0;\n");
+    write_src("}\n");
+
+    write_src("vartype spec_rand(void)\n");
+    write_src("{\n");
+    write_src("return rand();\n");
+    write_src("}\n");
+
+    write_src("vartype spec_time(void)\n");
+    write_src("{\n");
+    write_src("return time(NULL);\n");
+    write_src("}\n");
+
+    write_src("vartype (*special_funcs[])(void) = ");
+    write_src("{\n");
+    write_src("spec_zero,\n");
+    write_src("spec_rand,\n");
+    write_src("spec_time,\n");
+    write_src("};\n");
+
+    write_src("#define ARRAYLEN(x) (sizeof(x)/sizeof(x[0]))\n");
+
+    write_src("vartype get_special(int special)\n");
+    write_src("{\n");
+    write_src("if(special < ARRAYLEN(special_funcs))\n");
+    write_src("return special_funcs[special]();\n");
+    write_src("else\n");
+    write_src("ERROR(\"unknown special stream\");\n");
+    write_src("}\n");
+
 #if 0
     write_src("static inline void PUSH(imm_t n)\n");
     write_src("{\n");
     write_src("if(stack_pointer < STACK_SZ)\n");
     write_src("stack[stack_pointer++] = n;\n");
     write_src("else\n");
-    write_src("error(\"stack overflow\");\n");
+    write_src("ERROR(\"stack overflow\");\n");
     write_src("}\n");
 
     write_src("static inline imm_t POP(void)\n");
@@ -842,16 +866,20 @@ void write_stub_code(int num_lines)
     write_src("if(stack_pointer > 0)\n");
     write_src("return stack[--stack_pointer];\n");
     write_src("else\n");
-    write_src("error(\"stack underflow\");\n");
+    write_src("ERROR(\"stack underflow\");\n");
     write_src("}\n");
 #endif
 
     write_src("static inline vartype getvar(varid_t varid)\n");
     write_src("{\n");
     write_src("if(varid < %d)\n", MAX_VARS);
+    write_src("{\n");
+    write_src("struct var_t *var = vars+varid;\n");
+    write_src("if(var->type == TYPE_PLAIN)\n");
     write_src("return vars[varid].val;\n");
     write_src("else\n");
-    write_src("error(\"cannot access variable\");\n");
+    write_src("return get_special(vars[varid].special);\n");
+    write_src("}\n");
     write_src("}\n");
 
     write_src("static inline void setvar(varid_t varid, vartype val)\n");
@@ -859,7 +887,7 @@ void write_stub_code(int num_lines)
     write_src("if(varid < %d && !vars[varid].constant)\n", MAX_VARS);
     write_src("vars[varid].val = val;\n");
     write_src("else\n");
-    write_src("error(\"cannot modify variable\");\n");
+    write_src("ERROR(\"cannot modify variable\");\n");
     write_src("}\n");
 
     write_src("static inline void mkconst(varid_t varid)\n");
@@ -873,8 +901,8 @@ void write_stub_code(int num_lines)
     write_src("return a2<0 ? 0 : (a2==0?1:a1*eval_exp(a1, a2-1));\n");
     write_src("}\n");
 
-    write_src("#define JUMP(LINE) do{imm_t x = LINE; if(1 <= x && x <= %d) goto *jump_table[x]; else error(\"jump target out of range\");}while(0);\n\n", num_lines);
-    write_src("#define PUSH(VAL) do { imm_t x = VAL; if(stack_pointer < STACK_SZ) stack[stack_pointer++] = x; else error(\"stack overflow\");}while(0);\n\n");
+    write_src("#define JUMP(LINE) do{imm_t x = LINE; if(1 <= x && x <= %d) goto *jump_table[x]; else ERROR(\"jump target out of range\");}while(0);\n\n", num_lines);
+    write_src("#define PUSH(VAL) do { imm_t x = VAL; if(stack_pointer < STACK_SZ) stack[stack_pointer++] = x; else ERROR(\"stack overflow\");}while(0);\n\n");
     write_src("#define POP() (stack[--stack_pointer])\n");
 
     write_src("int main()\n");
@@ -882,6 +910,8 @@ void write_stub_code(int num_lines)
     write_src("register imm_t stack_pointer = 0, callstack_pointer = 0;\n");
     write_src("(void) stack_pointer; (void) callstack_pointer;\n");
     write_src("(void) eval_exp;\n");
+    /* prefetch some high-use variables */
+
     write_src("/* this uses labels as values, a GCC extension */\n");
 
     write_src("const void *jump_table[%d] = {\n", num_lines + 1);
@@ -905,7 +935,7 @@ int ducky_to_c(int fd, int out)
         init_globals();
 
         if(read_imm() != DUCKY_MAGIC)
-            error("unknown format");
+            ERROR("unknown format");
 
         num_lines = read_imm();
         for(unsigned int i = 1; i <= num_lines; ++i)
@@ -925,7 +955,7 @@ int ducky_to_c(int fd, int out)
             if(handler)
                 handler();
             else
-                error("invalid instruction %d", instr);
+                ERROR("invalid instruction %d", instr);
         }
         write_src("}");
         return 0;

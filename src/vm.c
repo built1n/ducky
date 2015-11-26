@@ -15,7 +15,15 @@ static unsigned stack_pointer;
 static jmp_buf exit_point;
 
 struct var_t {
-    vartype val;
+    enum { TYPE_PLAIN, TYPE_SPECIAL } type;
+
+    union {
+        vartype val;
+        struct {
+            enum special_id special;
+        };
+    };
+
     bool constant;
 };
 
@@ -29,9 +37,7 @@ static bool want_quit;
 static int repeats_left;
 static imm_t repeat_line;
 
-static void error(const char *fmt, ...) __attribute__((noreturn,format(print,1,2)));
 static void vid_write(const char *str);
-static void vid_logf(const char *fmt, ...) __attribute__((format(printf,1,2)));
 
 instr_t read_instr(void)
 {
@@ -81,21 +87,6 @@ static void __attribute__((format(printf,1,2))) vid_writef(const char *fmt, ...)
     va_end(ap);
 }
 
-static void __attribute__((noreturn,format(printf,1,2))) error(const char *fmt, ...)
-{
-    char fmtbuf[256];
-
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);
-    if(current_line)
-        vid_writef("Line %d: ", current_line);
-    vid_writef("ERROR: %s\n",  fmtbuf);
-    va_end(ap);
-
-    longjmp(exit_point, 1);
-}
-
 static void __attribute__((format(printf,1,2))) warning(const char *fmt, ...)
 {
     char fmtbuf[256];
@@ -122,7 +113,7 @@ static inline void push(imm_t n)
     if(stack_pointer < STACK_SZ)
         stack[stack_pointer++] = n;
     else
-        error("stack overflow");
+        ERROR("stack overflow");
 }
 
 static inline imm_t pop(void)
@@ -130,13 +121,19 @@ static inline imm_t pop(void)
     if(stack_pointer > 0)
         return stack[--stack_pointer];
     else
-        error("stack underflow");
+        ERROR("stack underflow");
 }
 
 static inline vartype getvar(varid_t varid)
 {
     if(varid < ARRAYLEN(vars))
-        return vars[varid].val;
+    {
+        struct var_t *var = vars+varid;
+        if(var->type == TYPE_PLAIN)
+            return vars[varid].val;
+        else
+            return get_special(vars[varid].special);
+    }
 }
 
 static inline void setvar(varid_t varid, vartype val)
@@ -144,7 +141,7 @@ static inline void setvar(varid_t varid, vartype val)
     if(varid < ARRAYLEN(vars) && !vars[varid].constant)
         vars[varid].val = val;
     else
-        error("cannot modify variable");
+        ERROR("cannot modify variable");
 }
 
 static inline void mkconst(varid_t varid)
@@ -161,7 +158,7 @@ static inline void jump(imm_t line)
         current_line = line;
     }
     else
-        error("jump target out of bounds");
+        ERROR("jump target out of bounds");
 }
 
 static void pushimm_handler(void)
@@ -215,7 +212,7 @@ static void repeat_handler(void)
     if(repeats_left > 0)
     {
         if(repeat_line + 1 != current_line)
-            error("nested REPEAT");
+            ERROR("nested REPEAT");
         --repeats_left;
         if(repeats_left > 0)
         {
@@ -243,7 +240,7 @@ static void subcall_handler(void)
         jump(pop());
     }
     else
-        error("call stack overflow");
+        ERROR("call stack overflow");
 }
 
 static void subret_handler(void)
@@ -253,7 +250,7 @@ static void subret_handler(void)
         jump(callstack[--callstack_pointer]);
     }
     else
-        error("call stack underflow");
+        ERROR("call stack underflow");
 }
 
 static void if_handler(void)
@@ -459,18 +456,26 @@ static void newline_handler(void)
     vid_writef("\n");
 }
 
-static void inc_line_pointer(void)
-{
-    ++current_line;
-
-    vars[0].val = current_line;
-}
-
 static void input_handler(void)
 {
     vartype val;
     scanf(VARFORMAT, &val);
     setvar(read_varid(), val);
+}
+
+static void mkspecial_handler(void)
+{
+    varid_t varid = read_varid();
+    vars[varid].constant = true;
+    vars[varid].type = TYPE_SPECIAL;
+    vars[varid].special = read_imm();
+}
+
+static void inc_line_pointer(void)
+{
+    ++current_line;
+
+    vars[0].val = current_line;
 }
 
 static void (*instr_tab[0x100])(void) = {
@@ -522,7 +527,7 @@ static void (*instr_tab[0x100])(void) = {
     NULL,              /*  0x2d  */
     newline_handler,   /*  0x2e  */
     input_handler,     /*  0x2f  */
-    NULL,              /*  0x30  */
+    mkspecial_handler, /*  0x30  */
     NULL,              /*  0x31  */
     NULL,              /*  0x32  */
     NULL,              /*  0x33  */
@@ -741,7 +746,7 @@ int ducky_vm(int fd)
         init_globals();
 
         if(read_imm() != DUCKY_MAGIC)
-            error("unknown format");
+            ERROR("unknown format");
 
         num_lines = read_imm();
         line_offset = malloc(num_lines + 1);
@@ -760,7 +765,7 @@ int ducky_vm(int fd)
             if(handler)
                 handler();
             else
-                error("invalid instruction");
+                ERROR("invalid instruction");
         }
         return 0;
     }

@@ -28,18 +28,6 @@
 
 /*** Defines ***/
 
-#define DEFAULT_DELAY 0
-#define STRING_DELAY 0
-#define TOKEN_IS(str) (strcmp(tok, str) == 0)
-#define MAX_LINE_LEN 512
-
-#define MAXOPSTACK 64
-#define MAXNUMSTACK 64
-#define CALL_STACK_SZ 64
-#define VARMAP_SIZE 256
-
-#define VARNAME_MAX 24
-
 /*** Globals ***/
 
 static off_t *line_offset = NULL;
@@ -57,12 +45,17 @@ static jmp_buf exit_point;
 
 struct varnode_t {
     char name[VARNAME_MAX + 1];
-    vartype val;
-    bool constant; /* used by setVariable */
+    enum { TYPE_PLAIN, TYPE_SPECIAL } type;
+    bool constant;
+    union {
+        vartype val;
+        struct {
+            enum special_id special;
+        };
+    };
     struct varnode_t *next;
 };
 
-static void error(const char *fmt, ...) __attribute__((noreturn,format(print,1,2)));
 static void vid_write(const char *str);
 static void vid_writef(const char *fmt, ...) __attribute__((format(printf,1,2)));
 static void debug(const char *fmt, ...) __attribute__((format(printf,1,2)));
@@ -108,6 +101,7 @@ static struct varnode_t *lookup_var(const char *name)
     strncpy(new->name, name, sizeof(new->name));
     new->val = 0;
     new->constant = false;
+    new->type = TYPE_PLAIN;
     new->next = NULL;
 
     if(!last)
@@ -120,7 +114,13 @@ static struct varnode_t *lookup_var(const char *name)
 
 static vartype getVariable(const char *name)
 {
-    return lookup_var(name)->val;
+    struct varnode_t *node = lookup_var(name);
+    if(node->type == TYPE_PLAIN)
+        return node->val;
+    else if(node->type == TYPE_SPECIAL)
+        return get_special(node->special);
+    else
+        ERROR("unknown type");
 }
 
 static void setVariable(const char *name, vartype val)
@@ -129,12 +129,20 @@ static void setVariable(const char *name, vartype val)
     if(!node->constant)
         node->val = val;
     else
-        error("attempted to modify a constant variable");
+        ERROR("attempted to modify a constant variable");
 }
 
 static void setConst(const char *name, bool c)
 {
     lookup_var(name)->constant = c;
+}
+
+static void setSpecial(const char *name, enum special_id spec)
+{
+    struct varnode_t *node = lookup_var(name);
+    node->type = TYPE_SPECIAL;
+    node->special = spec;
+    node->constant = true;
 }
 
 static void incVar(const char *name)
@@ -143,7 +151,7 @@ static void incVar(const char *name)
     if(!node->constant)
         ++lookup_var(name)->val;
     else
-        error("attempted to modify a constant variable");
+        ERROR("attempted to modify a constant variable");
 }
 
 static void decVar(const char *name)
@@ -152,7 +160,7 @@ static void decVar(const char *name)
     if(!node->constant)
         --lookup_var(name)->val;
     else
-        error("attempted to modify a constant variable");
+        ERROR("attempted to modify a constant variable");
 }
 
 /*** Utility functions ***/
@@ -193,21 +201,6 @@ static void __attribute__((format(printf,1,2))) vid_writef(const char *fmt, ...)
     va_end(ap);
 }
 
-static void __attribute__((noreturn,format(printf,1,2))) error(const char *fmt, ...)
-{
-    char fmtbuf[256];
-
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);
-    if(current_line)
-        vid_writef("Line %d: ", current_line);
-    vid_writef("ERROR: %s\n",  fmtbuf);
-    va_end(ap);
-
-    longjmp(exit_point, 1);
-}
-
 static void __attribute__((format(printf,1,2))) warning(const char *fmt, ...)
 {
     char fmtbuf[256];
@@ -219,79 +212,6 @@ static void __attribute__((format(printf,1,2))) warning(const char *fmt, ...)
     va_end(ap);
 }
 
-/* grabs a line from a file, -1 on error, returns # bytes read otherwise */
-static int read_line(int fd, char *buf, size_t sz)
-{
-    unsigned i = 0;
-    int bytes_read = 0;
-    int status = 1;
-    while(i < sz)
-    {
-        char c;
-        status = read(fd, &c, 1);
-        if(status != 1)
-            break;
-
-        ++bytes_read;
-
-        if(c == '\r')
-            continue;
-        if(c == '\n' || c == EOF)
-        {
-            break;
-        }
-
-        buf[i++] = c;
-    }
-    buf[MIN(i, sz - 1)] = '\0';
-
-    return (status <= 0)?-1:bytes_read;
-}
-
-/* index_lines() precalculates the offset of each line for faster jumping */
-/* also it does a quick pass to index all the labels */
-
-static off_t *index_lines(int fd, unsigned *numlines)
-{
-    size_t sz = sizeof(off_t);
-    off_t *data = malloc(sz);
-
-    /* this uses 1-indexed line numbers, so the first indice is wasted */
-    unsigned idx = 1;
-
-    while(1)
-    {
-        sz += sizeof(off_t);
-        data = realloc(data, sz);
-        data[idx] = lseek(fd, 0, SEEK_CUR);
-
-        char buf[MAX_LINE_LEN];
-
-        if(read_line(fd, buf, sizeof(buf)) < 0)
-            break;
-
-        char *save = NULL;
-        char *tok = strtok_r(buf, " \t", &save);
-        if(tok && (strcmp(tok, "LABEL") == 0 || strcmp("LBL", tok) == 0))
-        {
-            tok = strtok_r(NULL, " \t", &save);
-            if(tok && isValidVariable(tok))
-            {
-                setVariable(tok, idx);
-                lookup_var(tok)->constant = true;
-            }
-        }
-
-        ++idx;
-    }
-
-    lseek(fd, 0, SEEK_SET);
-
-    *numlines = idx - 1;
-
-    return data;
-}
-
 static void jump_line(int fd, unsigned where)
 {
     if(1 <= where && where <= num_lines)
@@ -299,7 +219,7 @@ static void jump_line(int fd, unsigned where)
         lseek(fd, line_offset[where], SEEK_SET);
     }
     else
-        error("JUMP target out of range (%u)", where);
+        ERROR("JUMP target out of range (%u)", where);
     current_line = where - 1;
 }
 
@@ -312,7 +232,7 @@ static void sub_call(int fd, unsigned where)
         jump_line(fd, where);
     }
     else
-        error("call stack overflow");
+        ERROR("call stack overflow");
 }
 
 static void sub_return(int fd)
@@ -344,14 +264,14 @@ static vartype eval_mul(vartype a1, vartype a2)
 static vartype eval_div(vartype a1, vartype a2)
 {
     if(!a2) {
-        error("division by zero");
+        ERROR("division by zero");
     }
     return a1/a2;
 }
 static vartype eval_mod(vartype a1, vartype a2)
 {
     if(!a2) {
-        error("division by zero");
+        ERROR("division by zero");
     }
     return a1%a2;
 }
@@ -525,7 +445,7 @@ static void opmap_insert(struct op_s *op)
     uint32_t hash = op_hash(op->op) % OPMAP_SIZE;
 
     if(op_map[hash].op)
-        error("hash map collision %lu: %s VS %s", hash, op->op, op_map[hash].op);
+        ERROR("hash map collision %lu: %s VS %s", hash, op->op, op_map[hash].op);
     memcpy(op_map+hash, op, sizeof(*op));
 }
 
@@ -566,7 +486,7 @@ static int nnumstack;
 static void push_opstack(const struct op_s *op)
 {
     if(nopstack>MAXOPSTACK - 1) {
-        error("operator stack overflow");
+        ERROR("operator stack overflow");
     }
     opstack[nopstack++] = op;
 }
@@ -574,7 +494,7 @@ static void push_opstack(const struct op_s *op)
 static const struct op_s *pop_opstack(void)
 {
     if(!nopstack) {
-        error("operator stack empty");
+        ERROR("operator stack empty");
     }
     return opstack[--nopstack];
 }
@@ -582,7 +502,7 @@ static const struct op_s *pop_opstack(void)
 static void push_numstack(vartype num)
 {
     if(nnumstack>MAXNUMSTACK - 1) {
-        error("number stack overflow");
+        ERROR("number stack overflow");
     }
     numstack[nnumstack++] = num;
 }
@@ -590,7 +510,7 @@ static void push_numstack(vartype num)
 static vartype pop_numstack(void)
 {
     if(!nnumstack) {
-        error("number stack empty");
+        ERROR("number stack empty");
     }
     return numstack[--nnumstack];
 }
@@ -684,7 +604,7 @@ static void shunt_op(const struct op_s *op)
 
         if(!(pop = pop_opstack()) || strcmp(pop->op,"(") != 0)
         {
-            error("mismatched parentheses");
+            ERROR("mismatched parentheses");
         }
         return;
     }
@@ -760,7 +680,7 @@ static vartype eval_expr(char *str)
                     }
                     else if(strcmp(op->op, "(") != 0 && !op->unary)
                     {
-                        error("illegal use of binary operator (%s)", op->op);
+                        ERROR("illegal use of binary operator (%s)", op->op);
                     }
                 }
                 shunt_op(op);
@@ -770,7 +690,7 @@ static vartype eval_expr(char *str)
                 tstart = expr;
             else if(!isSpace(*expr))
             {
-                error("syntax error");
+                ERROR("syntax ERROR");
             }
         }
         else
@@ -790,7 +710,7 @@ static vartype eval_expr(char *str)
             }
             else if(!isValidNumberOrVariable(expr))
             {
-                error("syntax error");
+                ERROR("syntax ERROR");
             }
         }
     }
@@ -811,7 +731,7 @@ static vartype eval_expr(char *str)
     }
 
     if(nnumstack != 1) {
-        error("invalid expression");
+        ERROR("invalid expression");
     }
 
     return numstack[0];
@@ -831,17 +751,17 @@ static int let_handler(char **save, int *repeats_left)
     {
         struct varnode_t *node = lookup_var(varname);
         if(node->constant)
-            error("attempted to modify a constant variable");
+            ERROR("attempted to modify a constant variable");
 
         char *tok = strtok_r(NULL, "=;", save);
         if(tok)
             node->val = eval_expr(tok);
         else
-            error("exprected valid expression after LET");
+            ERROR("exprected valid expression after LET");
     }
     else
     {
-        error("invalid variable name for LET");
+        ERROR("invalid variable name for LET");
     }
     return OK;
 }
@@ -852,7 +772,7 @@ static int repeat_handler(char **save, int *repeats_left)
     if(*repeats_left > 0)
     {
         if(repeat_line + 1 != current_line)
-            error("nested REPEAT");
+            ERROR("nested REPEAT");
         --(*repeats_left);
         if(*repeats_left)
             jump_line(file_des, repeat_line);
@@ -863,7 +783,7 @@ static int repeat_handler(char **save, int *repeats_left)
         if(tok)
         {
             if(current_line == 1)
-                error("REPEAT without a previous instruction");
+                ERROR("REPEAT without a previous instruction");
             *repeats_left = eval_expr(tok) - 1;
             if(*repeats_left)
             {
@@ -872,7 +792,7 @@ static int repeat_handler(char **save, int *repeats_left)
             }
         }
         else
-            error("expected valid expression after REPEAT");
+            ERROR("expected valid expression after REPEAT");
     }
     return NEXT;
 }
@@ -887,7 +807,7 @@ static int goto_handler(char **save, int *repeats_left)
         return NEXT;
     }
     else
-        error("expected valid expression after GOTO");
+        ERROR("expected valid expression after GOTO");
 }
 
 static int call_handler(char **save, int *repeats_left)
@@ -900,7 +820,7 @@ static int call_handler(char **save, int *repeats_left)
         return NEXT;
     }
     else
-        error("expected destination for CALL");
+        ERROR("expected destination for CALL");
 }
 
 static int ret_handler(char **save, int *repeats_left)
@@ -934,7 +854,7 @@ static int if_handler(char **save, int *repeats_left)
     char *tok = strtok_r(NULL, ";", save);
 
     if(!tok)
-        error("expected conditional after IF");
+        ERROR("expected conditional after IF");
 
     /* break out of the do-while if the condition is false */
     if(!eval_expr(tok))
@@ -958,7 +878,7 @@ static int delay_handler(char **save, int *repeats_left)
         nanosleep(&t, NULL);
     }
     else
-        error("expected valid expression after DELAY");
+        ERROR("expected valid expression after DELAY");
 
     return OK;
 }
@@ -982,7 +902,7 @@ static int logvar_handler(char **save, int *repeats_left)
         return OK;
     }
     else
-        error("expected expression after LOGVAR");
+        ERROR("expected expression after LOGVAR");
 }
 
 static int rem_handler(char **save, int *repeats_left)
@@ -1014,7 +934,7 @@ static int logchar_handler(char **save, int *repeats_left)
         return OK;
     }
     else
-        error("expected expression after LOGCHAR");
+        ERROR("expected expression after LOGCHAR");
 
 }
 
@@ -1027,12 +947,12 @@ static int input_handler(char **save, int *repeats_left)
     {
         struct varnode_t *node = lookup_var(varname);
         if(node->constant)
-            error("attempted to modify a constant variable");
+            ERROR("attempted to modify a constant variable");
 
         scanf(VARFORMAT, &node->val);
     }
     else
-        error("expected valid variable name after INPUT");
+        ERROR("expected valid variable name after INPUT");
     return OK;
 }
 
@@ -1046,12 +966,12 @@ static int prompt_handler(char **save, int *repeats_left)
         vid_writef("%s? ", varname);
         struct varnode_t *node = lookup_var(varname);
         if(node->constant)
-            error("attempted to modify a constant variable");
+            ERROR("attempted to modify a constant variable");
 
         scanf(VARFORMAT, &node->val);
     }
     else
-        error("expected valid variable name after PROMPT");
+        ERROR("expected valid variable name after PROMPT");
     return OK;
 }
 
@@ -1248,7 +1168,7 @@ static void tokmap_insert(struct token_t *tok)
 {
     uint32_t hash = tok_hash(tok->tok) % TOKMAP_SIZE;
     if(hash < 0 || tokmap[hash].tok)
-        error("FIXME: hash map collision");
+        ERROR("FIXME: hash map collision");
     memcpy(tokmap+hash, tok, sizeof(*tok));
 }
 
@@ -1289,7 +1209,7 @@ int ducky_interp(int fd, bool verbose)
         atexit(exit_handler);
 
         if(file_des < 0)
-            error("invalid file");
+            ERROR("invalid file");
 
         init_optable();
         init_tokmap();
@@ -1307,7 +1227,13 @@ int ducky_interp(int fd, bool verbose)
         setVariable("false", 0);
         setConst("false", true);
 
-        line_offset = index_lines(file_des, &num_lines);
+        /* initialize the special variables */
+        setSpecial("NULL", SPECIAL_NULL);
+        setSpecial("RAND", SPECIAL_RAND);
+        setSpecial("TIME", SPECIAL_TIME);
+
+        line_offset = index_lines(file_des, &num_lines, true, isValidVariable, setConst, setVariable);
+
         if(verbose)
         {
             vid_writef("Indexing complete (%u lines).", num_lines);
@@ -1356,13 +1282,13 @@ int ducky_interp(int fd, bool verbose)
                     case NEXT:
                         goto next_line;
                     default:
-                        error("FIXME: invalid return value");
+                        ERROR("FIXME: invalid return value");
                     }
                 else if(tok[0] == '#')
                     goto next_line;
                 else
                 {
-                    error("unknown token `%s` on line %d %d", tok, current_line);
+                    ERROR("unknown token `%s` on line %d %d", tok, current_line);
                     goto done;
                 }
             } while(tok);

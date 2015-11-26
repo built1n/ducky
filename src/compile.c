@@ -42,9 +42,7 @@ struct var_t {
     bool constant;
 };
 
-static void error(const char *fmt, ...) __attribute__((noreturn,format(print,1,2)));
 static void vid_write(const char *str);
-static void vid_logf(const char *fmt, ...) __attribute__((format(printf,1,2)));
 static void debug(const char *fmt, ...) __attribute__((format(printf,1,2)));
 static bool isValidVariable(const char *c);
 
@@ -119,6 +117,13 @@ static void setConst(const char *name, bool c)
     }
 }
 
+static void setSpecial(const char *name, enum special_id spec)
+{
+    write_instr(MKSPECIAL);
+    write_varid(get_varid(name));
+    write_imm(spec);
+}
+
 static void incVar(const char *name)
 {
     write_instr(INCVAR);
@@ -141,7 +146,7 @@ static void exit_handler(void)
         free(line_offset);
 }
 
-static void vid_write(const char *str)
+static void write_str(const char *str)
 {
     write_instr(WRITE_STR);
     while(*str)
@@ -151,134 +156,6 @@ static void vid_write(const char *str)
     write_byte('\0');
 }
 
-static void __attribute__((format(printf,1,2))) vid_logf(const char *fmt, ...)
-{
-    char fmtbuf[256];
-
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);
-    printf("%s\n", fmtbuf);
-    va_end(ap);
-}
-
-static void __attribute__((noreturn,format(printf,1,2))) error(const char *fmt, ...)
-{
-    char fmtbuf[256];
-
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);
-    if(current_line)
-        vid_logf("Line %d: ", current_line);
-    vid_logf("ERROR: %s",  fmtbuf);
-    va_end(ap);
-
-    longjmp(exit_point, 1);
-}
-
-static void __attribute__((format(printf,1,2))) warning(const char *fmt, ...)
-{
-    char fmtbuf[256];
-
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(fmtbuf, sizeof(fmtbuf), fmt, ap);
-    vid_logf("Line %d: WARNING: %s\n", current_line, fmtbuf);
-    va_end(ap);
-}
-
-/* grabs a line from a file, -1 on error, returns # bytes read otherwise */
-static int read_line(int fd, char *buf, size_t sz)
-{
-    unsigned i = 0;
-    int bytes_read = 0;
-    int status = 1;
-    while(i < sz)
-    {
-        char c;
-        status = read(fd, &c, 1);
-        if(status != 1)
-            break;
-
-        ++bytes_read;
-
-        if(c == '\r')
-            continue;
-        if(c == '\n' || c == EOF)
-        {
-            break;
-        }
-
-        buf[i++] = c;
-    }
-    buf[MIN(i, sz - 1)] = '\0';
-
-    return (status <= 0)?-1:bytes_read;
-}
-
-/* depends on index_lines, indexes labels in the file */
-static void index_labels(int fd)
-{
-    for(unsigned i = 1; i <= num_lines; ++i)
-    {
-        lseek(fd, line_offset[i], SEEK_SET);
-        char buf[MAX_LINE_LEN];
-        int status = read_line(fd, buf, sizeof(buf));
-
-        /* exit early if failed or too short for a label */
-        if(status < strlen("LBL"))
-            break;
-
-        char *save = NULL;
-        char *tok = strtok_r(buf, " \t", &save);
-        if(tok && (strcmp(tok, "LABEL") == 0 || strcmp("LBL", tok) == 0))
-        {
-            tok = strtok_r(NULL, " \t", &save);
-
-            vid_logf("found label %s val %d", tok, i);
-            if(tok && isValidVariable(tok))
-            {
-                setVariable(tok, i);
-                setConst(tok, true);
-            }
-        }
-    }
-    lseek(fd, 0, SEEK_SET);
-}
-
-/* index_lines() precalculates the offset of each line for faster jumping */
-/* the line data is only used by index_labels */
-
-static off_t *index_lines(int fd, unsigned *numlines)
-{
-    size_t sz = sizeof(off_t);
-    off_t *data = malloc(sz);
-
-    /* this uses 1-indexed line numbers, so the first indice is wasted */
-    unsigned idx = 1;
-
-    while(1)
-    {
-        sz += sizeof(off_t);
-        data = realloc(data, sz);
-        data[idx] = lseek(fd, 0, SEEK_CUR);
-
-        char buf[MAX_LINE_LEN];
-
-        if(read_line(fd, buf, sizeof(buf)) < 0)
-            break;
-
-        ++idx;
-    }
-
-    lseek(fd, 0, SEEK_SET);
-
-    *numlines = idx - 1;
-
-    return data;
-}
-
 static void jump_line(int fd, unsigned where)
 {
     if(1 <= where && where <= num_lines)
@@ -286,7 +163,7 @@ static void jump_line(int fd, unsigned where)
         lseek(fd, line_offset[where], SEEK_SET);
     }
     else
-        error("JUMP target out of range (%u)", where);
+        ERROR("JUMP target out of range (%u)", where);
     current_line = where - 1;
 }
 
@@ -481,7 +358,7 @@ static void opmap_insert(struct op_s *op)
     uint32_t hash = op_hash(op->op) % OPMAP_SIZE;
 
     if(op_map[hash].op)
-        error("hash map collision %lu: %s VS %s", hash, op->op, op_map[hash].op);
+        ERROR("hash map collision %lu: %s VS %s", hash, op->op, op_map[hash].op);
     memcpy(op_map+hash, op, sizeof(*op));
 }
 
@@ -519,7 +396,7 @@ static int nopstack;
 static void push_opstack(const struct op_s *op)
 {
     if(nopstack>MAXOPSTACK - 1) {
-        error("operator stack overflow");
+        ERROR("operator stack overflow");
     }
     opstack[nopstack++] = op;
 }
@@ -527,7 +404,7 @@ static void push_opstack(const struct op_s *op)
 static const struct op_s *pop_opstack(void)
 {
     if(!nopstack) {
-        error("operator stack empty");
+        ERROR("operator stack empty");
     }
     return opstack[--nopstack];
 }
@@ -600,7 +477,7 @@ static void shunt_op(const struct op_s *op)
 
         if(!(pop = pop_opstack()) || strcmp(pop->op,"(") != 0)
         {
-            error("mismatched parentheses");
+            ERROR("mismatched parentheses");
         }
         return;
     }
@@ -659,7 +536,7 @@ static vartype eval_expr(char *str)
                     }
                     else if(strcmp(op->op, "(") != 0 && !op->unary)
                     {
-                        error("illegal use of binary operator (%s)", op->op);
+                        ERROR("illegal use of binary operator (%s)", op->op);
                     }
                 }
                 shunt_op(op);
@@ -669,7 +546,7 @@ static vartype eval_expr(char *str)
                 tstart = expr;
             else if(!isSpace(*expr))
             {
-                error("syntax error");
+                ERROR("syntax ERROR");
             }
         }
         else
@@ -719,7 +596,7 @@ static vartype eval_expr(char *str)
             }
             else if(!isValidNumberOrVariable(expr))
             {
-                error("syntax error");
+                ERROR("syntax ERROR");
             }
         }
     }
@@ -766,14 +643,14 @@ static int let_handler(char **save)
         if(tok)
             eval_expr(tok);
         else
-            error("exprected valid expression after LET");
+            ERROR("exprected valid expression after LET");
 
         write_instr(POP);
         write_varid(varid);
     }
     else
     {
-        error("invalid variable name for LET");
+        ERROR("invalid variable name for LET");
     }
     return OK;
 }
@@ -791,7 +668,7 @@ static int repeat_handler(char **save)
         return OK;
     }
     else
-        error("expected valid expression after REPEAT");
+        ERROR("expected valid expression after REPEAT");
 }
 
 static int goto_handler(char **save)
@@ -805,7 +682,7 @@ static int goto_handler(char **save)
         return OK;
     }
     else
-        error("expected valid expression after GOTO");
+        ERROR("expected valid expression after GOTO");
 }
 
 static int call_handler(char **save)
@@ -820,7 +697,7 @@ static int call_handler(char **save)
         return OK;
     }
     else
-        error("expected destination for CALL");
+        ERROR("expected destination for CALL");
 }
 
 static int ret_handler(char **save)
@@ -857,7 +734,7 @@ static int if_handler(char **save)
     char *tok = strtok_r(NULL, ";", save);
 
     if(!tok)
-        error("expected conditional after IF");
+        ERROR("expected conditional after IF");
 
     eval_expr(tok);
     write_instr(PUSHIMM);
@@ -878,7 +755,7 @@ static int delay_handler(char **save)
         write_instr(DELAY);
     }
     else
-        error("expected valid expression after DELAY");
+        ERROR("expected valid expression after DELAY");
 
     return OK;
 }
@@ -888,7 +765,7 @@ static int log_handler(char **save)
     (void) save;
     char *tok = strtok_r(NULL, "", save);
 
-    vid_write(tok);
+    write_str(tok);
     return OK;
 }
 
@@ -903,7 +780,7 @@ static int logvar_handler(char **save)
         return OK;
     }
     else
-        error("expected expression after LOGVAR");
+        ERROR("expected expression after LOGVAR");
 }
 
 static int rem_handler(char **save)
@@ -936,7 +813,7 @@ static int logchar_handler(char **save)
         write_instr(LOGASCII);
     }
     else
-        error("expected expression after LOGCHAR");
+        ERROR("expected expression after LOGCHAR");
 
     return OK;
 }
@@ -954,7 +831,7 @@ static int input_handler(char **save)
     }
     else
     {
-        error("invalid variable name for INPUT");
+        ERROR("invalid variable name for INPUT");
     }
     return OK;
 }
@@ -967,14 +844,14 @@ static int prompt_handler(char **save)
     if(varname && isValidVariable(varname))
     {
         int varid = get_varid(varname);
-        vid_write(varname);
-        vid_write("? ");
+        write_str(varname);
+        write_str("? ");
         write_instr(READ_VAR);
         write_varid(varid);
     }
     else
     {
-        error("invalid variable name for PROMPT");
+        ERROR("invalid variable name for PROMPT");
     }
     return OK;
 }
@@ -1039,7 +916,7 @@ static int dfldel_handler(char **save)
         write_instr(DFL_DELAY);
     }
     else
-        error("expected expression for DEFAULT_DELAY");
+        ERROR("expected expression for DEFAULT_DELAY");
     return OK;
 }
 
@@ -1052,7 +929,7 @@ static int strdel_handler(char **save)
         write_instr(STR_DELAY);
     }
     else
-        error("expected expression for STRING_DELAY");
+        ERROR("expected expression for STRING_DELAY");
     return OK;
 }
 
@@ -1066,7 +943,7 @@ static int out_handler(char **save)
         write_instr(TYPE_DEC);
     }
     else
-        error("expected expression for default delay");
+        ERROR("expected expression for default delay");
     return OK;
 }
 
@@ -1639,7 +1516,7 @@ static void tokmap_insert(struct token_t *tok)
 {
     uint32_t hash = tok_hash(tok->tok) % TOKMAP_SIZE;
     if(hash < 0 || tokmap[hash].tok)
-        error("FIXME: hash map collision %s %s", tok->tok, tokmap[hash].tok);
+        ERROR("FIXME: hash map collision %s %s", tok->tok, tokmap[hash].tok);
     memcpy(tokmap+hash, tok, sizeof(*tok));
 }
 
@@ -1660,6 +1537,35 @@ static void init_globals(void)
     bytes_written = 0;
 }
 
+/* depends on index_lines's output, indexes labels in the file */
+void index_labels(int fd)
+{
+    for(unsigned i = 1; i <= num_lines; ++i)
+    {
+        lseek(fd, line_offset[i], SEEK_SET);
+        char buf[MAX_LINE_LEN];
+        int status = read_line(fd, buf, sizeof(buf));
+
+        /* exit early if failed or too short for a label */
+        if(status < strlen("LBL"))
+            break;
+
+        char *save = NULL;
+        char *tok = strtok_r(buf, " \t", &save);
+        if(tok && (strcmp(tok, "LABEL") == 0 || strcmp("LBL", tok) == 0))
+        {
+            tok = strtok_r(NULL, " \t", &save);
+
+            if(tok && isValidVariable(tok))
+            {
+                setVariable(tok, i);
+                setConst(tok, true);
+            }
+        }
+    }
+    lseek(fd, 0, SEEK_SET);
+}
+
 int ducky_compile(int fd, bool verbose, int out)
 {
     if(!setjmp(exit_point))
@@ -1677,12 +1583,12 @@ int ducky_compile(int fd, bool verbose, int out)
         atexit(exit_handler);
 
         if(file_des < 0)
-            error("invalid file");
+            ERROR("invalid file");
 
         init_optable();
         init_tokmap();
 
-        line_offset = index_lines(file_des, &num_lines);
+        line_offset = index_lines(file_des, &num_lines, false, isValidVariable, setConst, setVariable);
         write_imm(DUCKY_MAGIC);
         write_imm(num_lines);
         off_t linetab_off = bytes_written;
@@ -1702,6 +1608,11 @@ int ducky_compile(int fd, bool verbose, int out)
 
         makeConstantVariable("true", 1);
         makeConstantVariable("false", 0);
+
+        /* initialize the special variables */
+        setSpecial("NULL", SPECIAL_NULL);
+        setSpecial("RAND", SPECIAL_RAND);
+        setSpecial("TIME", SPECIAL_TIME);
 
         /* initialize labels (using output from index_lines) */
         index_labels(file_des);
@@ -1750,7 +1661,7 @@ int ducky_compile(int fd, bool verbose, int out)
                     case NEXT:
                         goto next_line;
                     default:
-                        error("FIXME: invalid return value");
+                        ERROR("FIXME: invalid return value");
                     }
 #ifdef DUCKY_ROCKBOX
                 else if(strlen(tok) == 1)
@@ -1763,7 +1674,7 @@ int ducky_compile(int fd, bool verbose, int out)
                     goto next_line;
                 else
                 {
-                    error("unknown token `%s` on line %d %d", tok, current_line);
+                    ERROR("unknown token `%s` on line %d %d", tok, current_line);
                     goto done;
                 }
             } while(tok);
