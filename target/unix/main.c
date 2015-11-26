@@ -12,6 +12,12 @@ char *progname;
 void arg_error(void)
 {
     printf("Usage: %s [-aceit] FILE\n", progname);
+    printf(" -a: compile to machine code\n");
+    printf(" -c: compile to bytecode\n");
+    printf(" -e: execute bytecode (not needed)\n");
+    printf(" -i: interpret directly (default action)\n");
+    printf(" -t: transcompile to C\n");
+    printf("Default action is to interpret or execute bytecode.\n");
     exit(EXIT_FAILURE);
 }
 
@@ -24,7 +30,9 @@ int main(int argc, char *argv[])
     {
         for(int i = 1; i < argc; ++i)
         {
-            if(!strcmp(argv[i], "-c"))
+            if(!strcmp(argv[i], "-a"))
+                action = EVERYTHING;
+            else if(!strcmp(argv[i], "-c"))
                 action = COMPILE;
             else if(!strcmp(argv[i], "-i"))
                 action = INTERP;
@@ -79,6 +87,35 @@ int main(int argc, char *argv[])
                     return 1;
                 }
                 break;
+            case EVERYTHING:
+            {
+                char bytecode[L_tmpnam];
+                tmpnam(bytecode);
+                out_fd = open(bytecode, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if(ducky_compile(fd, false, out_fd))
+                {
+                    printf("Compiler error.\n");
+                    return 1;
+                }
+
+                close(fd);
+                close(out_fd);
+
+                char c_code[L_tmpnam];
+                tmpnam(c_code);
+                fd = open(bytecode, O_RDONLY);
+                out_fd = open(c_code, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if(ducky_to_c(fd, out_fd))
+                {
+                    printf("Transcompiler error.\n");
+                    return 1;
+                }
+                close(fd);
+                close(out_fd);
+                char cmd[256];
+                snprintf(cmd, sizeof(cmd), "cc -O3 -lm -x c %s", c_code);
+                system(cmd);
+            }
             default:
                 break;
             }

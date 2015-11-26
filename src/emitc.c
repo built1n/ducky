@@ -506,7 +506,9 @@ static void inc_line_pointer(void)
 {
     ++current_line;
 
-    write_src_noindent("label_%d:\n", current_line);
+    --indent_depth;
+    write_src("case %d:\n", current_line);
+    ++indent_depth;
     write_src("vars[0].val = %d;\n\n", current_line);
 }
 
@@ -901,17 +903,17 @@ void write_stub_code(int num_lines)
     write_src("return a2<0 ? 0 : (a2==0?1:a1*eval_exp(a1, a2-1));\n");
     write_src("}\n");
 
-    write_src("#define JUMP(LINE) do{imm_t x = LINE; if(1 <= x && x <= %d) goto *jump_table[x]; else ERROR(\"jump target out of range\");}while(0);\n\n", num_lines);
+    write_src("#define JUMP(LINE) {imm_t x = LINE; if(1 <= x && x <= %d) { vars[0].val = x; break; } else ERROR(\"jump target out of range\");}\n\n", num_lines);
     write_src("#define PUSH(VAL) do { imm_t x = VAL; if(stack_pointer < STACK_SZ) stack[stack_pointer++] = x; else ERROR(\"stack overflow\");}while(0);\n\n");
-    write_src("#define POP() (stack[--stack_pointer])\n");
+    write_src("#define POP() (stack[--stack_pointer])\n\n");
 
     write_src("int main()\n");
     write_src("{\n");
     write_src("register imm_t stack_pointer = 0, callstack_pointer = 0;\n");
     write_src("(void) stack_pointer; (void) callstack_pointer;\n");
     write_src("(void) eval_exp;\n");
-    /* prefetch some high-use variables */
 
+#if 0
     write_src("/* this uses labels as values, a GCC extension */\n");
 
     write_src("const void *jump_table[%d] = {\n", num_lines + 1);
@@ -923,6 +925,15 @@ void write_stub_code(int num_lines)
     }
     write_src("};\n");
     write_src_noindent("\n");
+#endif
+    write_src("for(;;)\n");
+    write_src("{\n");
+    write_src("switch(vars[0].val)\n");
+    write_src("{\n");
+    --indent_depth;
+    write_src("case 0:\n");
+    ++indent_depth;
+    write_src("/* init code */\n");
 }
 
 int ducky_to_c(int fd, int out)
@@ -957,6 +968,9 @@ int ducky_to_c(int fd, int out)
             else
                 ERROR("invalid instruction %d", instr);
         }
+        write_src("return 0;\n");
+        write_src("}\n");
+        write_src("}\n");
         write_src("}");
         return 0;
     }
