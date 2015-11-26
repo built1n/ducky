@@ -874,19 +874,26 @@ void write_stub_code(int num_lines)
 
     write_src("static inline vartype getvar(varid_t varid)\n");
     write_src("{\n");
+#if MAX_VARS < 65536
     write_src("if(varid < %d)\n", MAX_VARS);
     write_src("{\n");
+#endif
     write_src("struct var_t *var = vars+varid;\n");
     write_src("if(var->type == TYPE_PLAIN)\n");
     write_src("return vars[varid].val;\n");
     write_src("else\n");
     write_src("return get_special(vars[varid].special);\n");
     write_src("}\n");
+#if MAX_VARS < 65536
     write_src("}\n");
+#endif
 
     write_src("static inline void setvar(varid_t varid, vartype val)\n");
     write_src("{\n");
-    write_src("if(varid < %d && !vars[varid].constant)\n", MAX_VARS);
+#if MAX_VARS < 65536
+    write_src("if(varid < %d)\n", MAX_VARS);
+#endif
+    write_src("if(!vars[varid].constant)\n", MAX_VARS);
     write_src("vars[varid].val = val;\n");
     write_src("else\n");
     write_src("ERROR(\"cannot modify variable\");\n");
@@ -894,7 +901,9 @@ void write_stub_code(int num_lines)
 
     write_src("static inline void mkconst(varid_t varid)\n");
     write_src("{\n");
+#if MAX_VARS < 65536
     write_src("if(varid < %d)\n", MAX_VARS);
+#endif
     write_src("vars[varid].constant = true;\n");
     write_src("}\n");
 

@@ -786,7 +786,6 @@ static int logvar_handler(char **save)
 static int rem_handler(char **save)
 {
     (void) save;
-    vid_logf("REM, skipping line");
     return BREAK;
 }
 
